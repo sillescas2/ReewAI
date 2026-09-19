@@ -1,0 +1,49 @@
+[
+  {
+    "id": "cat_santi_mkt",
+    "userId": "usr_santi_illescas",
+    "name": "Marketing Digital",
+    "color": "#3b82f6",
+    "description": "Estrategias de marketing, publicidad, ventas, embudos, captación, retención, ganchos (hooks) y redes sociales.",
+    "createdAt": "2025-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "cat_santi_tech",
+    "userId": "usr_santi_illescas",
+    "name": "Tecnología e IA",
+    "color": "#8b5cf6",
+    "description": "Inteligencia artificial, software, informática, programación, hardware, redes, routers, wifi y desarrollo técnico.",
+    "createdAt": "2025-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "cat_santi_des",
+    "userId": "usr_santi_illescas",
+    "name": "Desarrollo Personal",
+    "color": "#10b981",
+    "description": "Hábitos, mentalidad, crecimiento personal, libros, disciplina, equilibrio vida-trabajo y productividad.",
+    "createdAt": "2025-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "cat_santi_rec",
+    "userId": "usr_santi_illescas",
+    "name": "Recetas y Cocina",
+    "color": "#f59e0b",
+    "description": "Recetas de cocina, técnicas culinarias, ingredientes, gastronomía, postres y preparación de comida.",
+    "createdAt": "2025-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "cat_santi_none",
+    "userId": "usr_santi_illescas",
+    "name": "Sin categorías",
+    "color": "#64748b",
+    "description": "Contenido genérico o que no encaja en ninguna otra categoría específica del usuario.",
+    "createdAt": "2025-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "cat_usr_default_default",
+    "userId": "usr_default",
+    "name": "Sin categorías",
+    "color": "#64748b",
+    "createdAt": "2026-09-19T11:28:33.765Z"
+  }
+]

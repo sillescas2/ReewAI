@@ -1,0 +1,98 @@
+[
+  {
+    "id": "reel-1",
+    "url": "https://www.instagram.com/reel/C3x9L_pM4Q/",
+    "originalUrl": "https://www.instagram.com/reel/C3x9L_pM4Q/?igsh=MWF5eGZ3MWg3aA==",
+    "platform": "instagram",
+    "title": "3 Ganchos Psicológicos para Retener Audiencia en Reels",
+    "summary": "Explica 3 técnicas probadas de retención para videos cortos: el corte en falso antes del segundo 3, la pregunta contraintuitiva y el loop visual continuo sin pausa perceptible.",
+    "keyTakeaways": [
+      "Los primeros 2.5 segundos determinan el 80% de la retención del algoritmo",
+      "Evitar saludos convencionales; comenzar directamente en el clímax o conflicto",
+      "Diseñar el final de la frase para que enlace gramaticalmente con la primera palabra (bucle perfecto)"
+    ],
+    "category": "Marketing Digital",
+    "tags": ["Reels", "Algoritmo", "Retención", "Creadores de Contenido"],
+    "estimatedTime": "Reel 45s",
+    "authorOrChannel": "@growth_creators",
+    "userNote": "Aplicar el bucle perfecto a los reels de la próxima semana",
+    "createdAt": "2026-09-12T10:30:00.000Z",
+    "thumbnailUrl": "https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=500&auto=format&fit=crop&q=60",
+    "duplicateCheck": {
+      "isDuplicateTopic": false,
+      "similarityScore": 10
+    }
+  },
+  {
+    "id": "reel-2",
+    "url": "https://www.facebook.com/reel/98234710293817",
+    "originalUrl": "https://www.facebook.com/reel/98234710293817?mibextid=rS40aB7S9Ucbxw6v",
+    "platform": "facebook",
+    "title": "Pizza en Sartén con Base Crujiente en 10 Minutos",
+    "summary": "Receta exprés de pizza casera sin levado utilizando sartén antiadherente con tapa a fuego medio. Logra queso fundido con soplete o tapa condensadora y una base tostada sin encender el horno.",
+    "keyTakeaways": [
+      "Mezcla de harina de trigo, yogur griego natural y pizca de bicarbonato",
+      "Cocinar primero la base 3 minutos antes de añadir la salsa y el queso",
+      "Tapar con unas gotas de agua al lado para generar vapor que funda la mozzarella"
+    ],
+    "category": "Recetas y Cocina",
+    "tags": ["Cocina Rápida", "Pizza", "Sin Horno", "Cenas Fáciles"],
+    "estimatedTime": "Reel 58s",
+    "authorOrChannel": "Cocina con Alma (Facebook)",
+    "userNote": "Probar para cenar el fin de semana",
+    "createdAt": "2026-09-10T19:15:00.000Z",
+    "thumbnailUrl": "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=500&auto=format&fit=crop&q=60",
+    "duplicateCheck": {
+      "isDuplicateTopic": false,
+      "similarityScore": 5
+    }
+  },
+  {
+    "id": "web-1",
+    "url": "https://blog.developer.tech/guia-embeddings-ia-busqueda-semantica",
+    "originalUrl": "https://blog.developer.tech/guia-embeddings-ia-busqueda-semantica?utm_source=twitter",
+    "platform": "web",
+    "title": "Arquitectura de Búsqueda Semántica con Embeddings y Vector DBs",
+    "summary": "Artículo técnico exhaustivo que explica cómo transformar textos en vectores densos multidimensionales para calcular similitudes semánticas (distancia coseno) y evitar duplicados o mejorar motores de búsqueda.",
+    "keyTakeaways": [
+      "Diferencia entre búsqueda léxica (BM25) y búsqueda por significado contextual",
+      "Estrategias de fragmentación (chunking) inteligente con superposición del 15%",
+      "Indexación HNSW para consultas de milisegundos en bases de datos vectoriales"
+    ],
+    "category": "Tecnología e IA",
+    "tags": ["Inteligencia Artificial", "Embeddings", "Vectores", "Desarrollo Web"],
+    "estimatedTime": "Lectura 6 min",
+    "authorOrChannel": "Tech Developer Blog",
+    "userNote": "Referencia para el proyecto de búsqueda",
+    "createdAt": "2026-09-08T14:20:00.000Z",
+    "thumbnailUrl": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&auto=format&fit=crop&q=60",
+    "duplicateCheck": {
+      "isDuplicateTopic": false,
+      "similarityScore": 0
+    }
+  },
+  {
+    "id": "reel-3",
+    "url": "https://www.instagram.com/reel/DA18vK9s3_x/",
+    "originalUrl": "https://www.instagram.com/reel/DA18vK9s3_x/?igsh=MXFhM2Y1c3N6",
+    "platform": "instagram",
+    "title": "Sistema de 3 Cuentas Bancarias para Ahorrar en Piloto Automático",
+    "summary": "Metodología financiera práctica: automatizar transferencias el día de cobro dividiendo ingresos en Gastos Fijos (50%), Inversión/Ahorro (30%) y Ocio sin culpa (20%) en entidades separadas para evitar gastos impulsivos.",
+    "keyTakeaways": [
+      "Pagar primero a tu futuro antes de pagar a los comercios",
+      "Tener la cuenta de ahorro en un banco diferente sin tarjeta de débito física asociada",
+      "Revisión trimestral de suscripciones ocultas"
+    ],
+    "category": "Finanzas e Inversión",
+    "tags": ["Ahorro", "Finanzas Personales", "Presupuesto", "Automatización"],
+    "estimatedTime": "Reel 40s",
+    "authorOrChannel": "@finanzas_claras",
+    "userNote": "Configurar las transferencias programadas el día 1 de cada mes",
+    "createdAt": "2026-09-05T09:00:00.000Z",
+    "thumbnailUrl": "https://images.unsplash.com/photo-1579621970563-ebec7560ff3e?w=500&auto=format&fit=crop&q=60",
+    "duplicateCheck": {
+      "isDuplicateTopic": false,
+      "similarityScore": 12
+    }
+  }
+]

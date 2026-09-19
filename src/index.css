@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* Ocultar badge inyectado por Netlify si se monta en el DOM */
+iframe[src*="netlify"],
+iframe[id*="netlify"],
+iframe[title*="Netlify"],
+div[class*="netlify"],
+div[id*="netlify"],
+netlify-drawer,
+[data-netlify-badge],
+.netlify-badge {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

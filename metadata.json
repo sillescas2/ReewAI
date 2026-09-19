@@ -1,0 +1,8 @@
+{
+  "name": "Remix ReewAI (Reel \u0026 Web Saver AI)",
+  "description": "Guarda reels de Instagram, Facebook y enlaces web con resúmenes automáticos mediante IA, vista en tabla y detección inteligente de enlaces y temas duplicados.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
