@@ -18,6 +18,7 @@ import { SavedLinkItem, AnalyzeLinkResponse, PlatformType, CategoryItem } from '
 import { APP_VERSION } from '../constants/version';
 import { getPlatformInfo } from '../utils/platformHelper';
 import { analyzeLinkClientFallback, detectClientPlatform } from '../lib/clientLinkAnalyzer';
+import { useAiStatus } from '../services/aiStatusService';
 
 function deriveDirectUrlTitle(url: string): string {
   try {
@@ -41,6 +42,7 @@ interface AddLinkModalProps {
   initialUrl?: string;
   initialNote?: string;
   categories?: CategoryItem[];
+  onOpenGeminiGuide?: () => void;
 }
 
 export const AddLinkModal: React.FC<AddLinkModalProps> = ({
@@ -51,7 +53,9 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
   initialUrl = '',
   initialNote = '',
   categories = [],
+  onOpenGeminiGuide,
 }) => {
+  const { isKeyMissing } = useAiStatus();
   const [url, setUrl] = useState(initialUrl || '');
   const [manualTitle, setManualTitle] = useState('');
   const [manualSummary, setManualSummary] = useState('');
@@ -165,6 +169,10 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
             manualTitle: manualTitle.trim() || undefined,
             manualSummary: manualSummary.trim() || undefined,
             allowedCategories: availableCategories.map((c) => c.name),
+            categoryObjects: availableCategories.map((c) => ({
+              name: c.name,
+              description: c.description || '',
+            })),
             existingItems: existingItems.map((item) => ({
               id: item.id,
               url: item.url,
@@ -368,6 +376,28 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
         <div className="p-4 sm:p-6 space-y-5 flex-1 overflow-y-auto overscroll-contain">
           {!analysisResult ? (
             <form onSubmit={handleAnalyze} className="space-y-4">
+              {/* Alert if GEMINI_API_KEY is not configured in Netlify */}
+              {isKeyMissing && (
+                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-start gap-2.5 text-amber-900 text-xs shadow-2xs">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="flex-1 space-y-1">
+                    <p className="font-bold">⚠️ Falta configurar GEMINI_API_KEY en Netlify</p>
+                    <p className="text-amber-800 text-[11px] leading-relaxed">
+                      La Inteligencia Artificial de Gemini está inactiva. Los enlaces se guardarán con título básico sin transcribir el reel.
+                    </p>
+                    {onOpenGeminiGuide && (
+                      <button
+                        type="button"
+                        onClick={onOpenGeminiGuide}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-violet-700 hover:text-violet-900 underline cursor-pointer"
+                      >
+                        <span>Ver cómo añadir GEMINI_API_KEY en tu panel de Netlify →</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* URL Input */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-neutral-700 uppercase tracking-wider">
@@ -630,6 +660,25 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
           ) : (
             /* STEP 2: Review & Confirm AI Results */
             <div className="space-y-4">
+              {/* Notice if analyzed without Gemini API Key */}
+              {analysisResult.geminiKeyMissing && (
+                <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex flex-wrap items-center justify-between gap-2.5 text-xs text-amber-900 shadow-2xs">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Metadatos básicos guardados. Falta <strong>GEMINI_API_KEY</strong> en Netlify para transcripción IA.</span>
+                  </div>
+                  {onOpenGeminiGuide && (
+                    <button
+                      type="button"
+                      onClick={onOpenGeminiGuide}
+                      className="text-[11px] font-bold text-violet-700 hover:text-violet-900 underline shrink-0 cursor-pointer"
+                    >
+                      Configurar en Netlify
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Duplicate Warning if flagged */}
               {analysisResult.duplicateCheck?.isDuplicateTopic && !userIgnoredDuplicate && (
                 <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl space-y-2">

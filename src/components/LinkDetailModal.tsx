@@ -18,6 +18,7 @@ import {
   ChevronDown,
   RotateCcw,
   Plus,
+  RefreshCw,
 } from 'lucide-react';
 import { SavedLinkItem, CategoryItem } from '../types';
 import { APP_VERSION } from '../constants/version';
@@ -28,11 +29,12 @@ interface LinkDetailModalProps {
   onClose: () => void;
   onDeleteItem: (id: string) => void;
   onUpdateNote?: (id: string, newNote: string) => void;
-  onUpdateItem?: (id: string, updates: { userNote?: string; category?: string; title?: string; summary?: string }) => void;
+  onUpdateItem?: (id: string, updates: Partial<SavedLinkItem>) => void;
   onNavigateToItem?: (item: SavedLinkItem) => void;
   allItems: SavedLinkItem[];
   categories?: CategoryItem[];
   categoryColors?: Record<string, string>;
+  onOpenGeminiGuide?: () => void;
 }
 
 export const LinkDetailModal: React.FC<LinkDetailModalProps> = ({
@@ -45,6 +47,7 @@ export const LinkDetailModal: React.FC<LinkDetailModalProps> = ({
   allItems,
   categories = [],
   categoryColors = {},
+  onOpenGeminiGuide,
 }) => {
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedSummary, setCopiedSummary] = useState(false);
@@ -191,6 +194,80 @@ export const LinkDetailModal: React.FC<LinkDetailModalProps> = ({
   const handleCancelSummary = () => {
     setSummaryText(item.summary || '');
     setIsEditingSummary(false);
+  };
+
+  // Re-analyze with AI
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
+  const [reanalyzeFeedback, setReanalyzeFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleReanalyzeWithAI = async () => {
+    if (!item || isReanalyzing) return;
+    setIsReanalyzing(true);
+    setReanalyzeFeedback(null);
+
+    try {
+      const targetUrl = item.originalUrl || item.url;
+      const res = await fetch('/api/analyze-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: targetUrl,
+          userNote: item.userNote || undefined,
+          allowedCategories: categories?.map((c) => c.name) || [],
+          categoryObjects: categories?.map((c) => ({
+            name: c.name,
+            description: c.description || '',
+          })),
+        }),
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('Servidor de IA no disponible o devolvió una respuesta no válida.');
+      }
+
+      const json = await res.json();
+      if (res.ok && json.success && json.data) {
+        const d = json.data;
+        if (onUpdateItem) {
+          onUpdateItem(item.id, {
+            title: d.title || item.title,
+            summary: d.summary || item.summary,
+            category: d.category || item.category,
+            keyTakeaways: d.keyTakeaways || item.keyTakeaways,
+            tags: d.tags || item.tags,
+            authorOrChannel: d.authorOrChannel || item.authorOrChannel,
+            thumbnailUrl: d.thumbnailUrl || item.thumbnailUrl,
+            estimatedTime: d.estimatedTime || item.estimatedTime,
+          });
+        }
+        setTitleText(d.title || item.title);
+        setSummaryText(d.summary || item.summary);
+        setSelectedCategory(d.category || item.category);
+
+        if (json.geminiKeyMissing || d.geminiKeyMissing) {
+          setReanalyzeFeedback({
+            type: 'error',
+            message: 'GEMINI_API_KEY no está configurada en Netlify. Los metadatos se actualizaron en modo básico sin transcripción IA.',
+          });
+        } else {
+          setReanalyzeFeedback({ type: 'success', message: '¡Análisis con IA actualizado con éxito!' });
+          setTimeout(() => setReanalyzeFeedback(null), 4000);
+        }
+      } else {
+        setReanalyzeFeedback({
+          type: 'error',
+          message: json.error || 'No se pudo obtener información del enlace con IA.',
+        });
+      }
+    } catch (err: any) {
+      setReanalyzeFeedback({
+        type: 'error',
+        message: err.message || 'Error de conexión con el servicio de IA.',
+      });
+    } finally {
+      setIsReanalyzing(false);
+    }
   };
 
   // Find related duplicate item if referenced
@@ -578,6 +655,20 @@ export const LinkDetailModal: React.FC<LinkDetailModalProps> = ({
                   </h3>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  {/* Re-analyze with AI button */}
+                  {!isEditingSummary && onUpdateItem && (
+                    <button
+                      id="btn-reanalyze-ai"
+                      type="button"
+                      onClick={handleReanalyzeWithAI}
+                      disabled={isReanalyzing}
+                      className="inline-flex items-center gap-1 text-xs text-violet-700 hover:text-violet-900 font-medium px-2 py-1 bg-violet-50 hover:bg-violet-100 border border-violet-200/80 rounded-lg transition-colors cursor-pointer disabled:opacity-60"
+                      title="Re-analizar contenido con IA"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isReanalyzing ? 'animate-spin text-violet-600' : 'text-violet-500'}`} />
+                      <span>{isReanalyzing ? 'Analizando...' : 'Re-analizar IA'}</span>
+                    </button>
+                  )}
                   {!isEditingSummary && onUpdateItem && (
                     <button
                       id="btn-edit-summary"
@@ -609,6 +700,34 @@ export const LinkDetailModal: React.FC<LinkDetailModalProps> = ({
                   </button>
                 </div>
               </div>
+
+              {reanalyzeFeedback && (
+                <div
+                  className={`p-3 rounded-xl text-xs flex flex-wrap items-center justify-between gap-2.5 animate-in fade-in ${
+                    reanalyzeFeedback.type === 'success'
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      : 'bg-amber-50 text-amber-900 border border-amber-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    {reanalyzeFeedback.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    )}
+                    <span>{reanalyzeFeedback.message}</span>
+                  </div>
+                  {reanalyzeFeedback.type === 'error' && onOpenGeminiGuide && (
+                    <button
+                      type="button"
+                      onClick={onOpenGeminiGuide}
+                      className="text-[11px] font-bold text-violet-700 hover:text-violet-900 underline shrink-0 cursor-pointer"
+                    >
+                      Configurar en Netlify →
+                    </button>
+                  )}
+                </div>
+              )}
 
               {!isEditingSummary ? (
                 <p className="text-xs sm:text-sm text-neutral-700 leading-relaxed">

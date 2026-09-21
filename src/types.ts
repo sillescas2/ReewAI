@@ -63,6 +63,8 @@ export interface AnalyzeLinkRequest {
 
 export interface AnalyzeLinkResponse {
   success: boolean;
+  geminiKeyMissing?: boolean;
+  aiProcessed?: boolean;
   data?: {
     platform: PlatformType;
     title: string;
@@ -79,6 +81,23 @@ export interface AnalyzeLinkResponse {
       title: string;
       url: string;
     };
+    geminiKeyMissing?: boolean;
+    aiProcessed?: boolean;
   };
   error?: string;
+}
+
+export interface AiStatusResponse {
+  success: boolean;
+  configured: boolean;
+  hasKey: boolean;
+  missingKey: boolean;
+  provider: string;
+  environment?: string;
+  message: string;
+  setupGuide?: {
+    variableName: string;
+    dashboardUrl?: string;
+    steps: string[];
+  };
 }

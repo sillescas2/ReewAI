@@ -7,6 +7,7 @@ import fs from 'fs';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { db } from './server/database';
+import { analyzeLinkCore } from './server/linkAnalysisCore';
 
 const app = express();
 const PORT = 3000;
@@ -516,6 +517,36 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
+// AI Configuration Status (Checks whether GEMINI_API_KEY is defined in environment)
+app.get('/api/ai-status', (req: Request, res: Response) => {
+  const rawKey = process.env.GEMINI_API_KEY;
+  const hasKey = Boolean(rawKey && rawKey.trim().length > 5);
+  res.json({
+    success: true,
+    configured: hasKey,
+    hasKey,
+    missingKey: !hasKey,
+    provider: 'Google Gemini AI',
+    environment: process.env.NETLIFY ? 'netlify' : 'node',
+    message: hasKey
+      ? 'La variable GEMINI_API_KEY está configurada y lista.'
+      : 'La variable de entorno GEMINI_API_KEY no está configurada.',
+    setupGuide: {
+      variableName: 'GEMINI_API_KEY',
+      dashboardUrl: 'https://app.netlify.com',
+      steps: [
+        'Inicia sesión en app.netlify.com y abre tu sitio web de ReewAI.',
+        'En el menú lateral, dirígete a "Site configuration" (o "Site settings") -> "Environment variables".',
+        'Haz clic en "Add a variable" (o "Add single variable").',
+        'En Key (clave) escribe exactamente: GEMINI_API_KEY',
+        'En Value (valor) pega tu API Key de Google AI Studio / Gemini.',
+        'Haz clic en "Create variable".',
+        'IMPORTANTE: Ve a la pestaña "Deploys" -> pulsa "Trigger deploy" -> "Clear cache and deploy site" para que Netlify cargue la nueva variable en las funciones serverless.',
+      ],
+    },
+  });
+});
+
 // 1. GET /api/links - Strictly isolated to authenticated user
 app.get('/api/links', (req: Request, res: Response) => {
   const userId = (req.query.userId as string) || (req.headers['x-user-id'] as string);
@@ -850,19 +881,20 @@ app.delete('/api/categories/:id', (req: Request, res: Response) => {
 // Analyze link with Gemini AI (Metadata + Summary + Topic Duplicate Check)
 app.post('/api/analyze-link', async (req: Request, res: Response) => {
   try {
-    const { url, userNote, manualTitle, manualSummary, existingItems = [], allowedCategories = [], userId } = req.body;
+    const { url, userNote, manualTitle, manualSummary, existingItems = [], allowedCategories = [], categoryObjects: providedCategories, userId } = req.body;
 
     if (!url || typeof url !== 'string' || !url.trim()) {
       return res.status(400).json({ success: false, error: 'Por favor ingresa una URL válida.' });
     }
 
-    const cleanInputUrl = url.trim();
-    const normalizedInputUrl = normalizeUrl(cleanInputUrl);
-    const platform = detectPlatform(cleanInputUrl);
-
     // Resolve allowed registered categories and their AI guide descriptions for this user
     let categoryObjects: Array<{ name: string; description: string }> = [];
-    if (Array.isArray(allowedCategories) && allowedCategories.length > 0) {
+    if (Array.isArray(providedCategories) && providedCategories.length > 0) {
+      categoryObjects = providedCategories.map((c: any) => ({
+        name: (c?.name || '').trim(),
+        description: (c?.description || '').trim(),
+      })).filter((c) => Boolean(c.name));
+    } else if (Array.isArray(allowedCategories) && allowedCategories.length > 0) {
       categoryObjects = allowedCategories
         .map((c: any) => {
           if (typeof c === 'string') {
@@ -879,254 +911,24 @@ app.post('/api/analyze-link', async (req: Request, res: Response) => {
       }));
     }
 
-    if (categoryObjects.length === 0) {
-      categoryObjects = [{ name: 'Sin categorías', description: 'Contenido genérico o que no encaja en ninguna otra categoría.' }];
-    }
+    const data = await analyzeLinkCore({
+      url: url.trim(),
+      userNote: userNote?.trim() || undefined,
+      manualTitle: manualTitle?.trim() || undefined,
+      manualSummary: manualSummary?.trim() || undefined,
+      existingItems,
+      allowedCategories,
+      categoryObjects,
+      userId,
+    });
 
-    const validCategoriesList = categoryObjects.map((c) => c.name);
-
-    // Format category descriptions for Gemini AI instruction
-    const categoriesGuideForPrompt = categoryObjects
-      .map((c) => `- "${c.name}": ${c.description ? `(Descripción y temas: ${c.description})` : '(Sin descripción detallada)'}`)
-      .join('\n');
-
-    // 1. Check exact URL duplicate against existing items
-    const exactMatch = (existingItems as any[]).find(
-      (item) => normalizeUrl(item.url) === normalizedInputUrl || normalizeUrl(item.originalUrl || '') === normalizedInputUrl
-    );
-
-    // 2. Fetch rich media metadata (Instagram captioned embed, TikTok oEmbed, YouTube oEmbed, OpenGraph HTML)
-    const meta = await fetchMediaMetadata(cleanInputUrl, platform);
-
-    // 3. Determine the primary reel caption or text description
-    const effectiveCaption = (manualSummary?.trim() || meta.caption || meta.description || '').trim();
-    const suggestedTitle = (manualTitle?.trim() || meta.title || '').trim();
-
-    // 4. Prepare context of existing items for semantic duplicate / topic check
-    const existingThemesSummary = (existingItems as any[])
-      .slice(0, 30) // limit to top 30 to stay concise
-      .map((item, idx) => `[ID: ${item.id}] Título: "${item.title}" | Categoría: "${item.category}" | Resumen: "${(item.summary || '').slice(0, 140)}"`)
-      .join('\n');
-
-    // 5. Call Gemini for intelligent transcription, summarization, and dependent categorization
-    const prompt = `
-Actúa como un experto en análisis y síntesis de contenido digital y redes sociales.
-El usuario quiere guardar el siguiente enlace en su biblioteca personal:
-
-INFORMACIÓN DEL ENLACE Y METADATOS EXTRAÍDOS:
-- URL: ${cleanInputUrl}
-- Plataforma detectada: ${platform.toUpperCase()}
-- Autor / Creador detectado: ${meta.author || 'No disponible'}
-- Título detectado o propuesto: ${suggestedTitle || '(No disponible directamente)'}
-- DESCRIPCIÓN Y TRANSCRIPCIÓN REAL DEL REEL / VIDEO / PÁGINA:
-"""
-${effectiveCaption || '(No se extrajo descripción directa; analiza el enlace y contexto)'}
-"""
-- Nota personal del usuario: ${userNote ? `"${userNote}"` : '(Sin nota previa)'}
-
-CATEGORÍAS DADAS DE ALTA POR EL USUARIO Y SUS DESCRIPCIONES (OBLIGATORIAS):
-${categoriesGuideForPrompt}
-
-REGLA ESTRICTA DE CATEGORIZACIÓN:
-- El usuario ha definido descripciones específicas para cada categoría para que entiendas con precisión a qué se refieren.
-- Compara el contenido de la transcripción, descripción y resumen con las descripciones de las categorías anteriores.
-- Asigna OBLIGATORIAMENTE la categoría cuya descripción mejor se adapte al contenido.
-- Solo puedes seleccionar el NOMBRE EXACTO de una categoría de esta lista: [${validCategoriesList.join(', ')}]. NUNCA inventes categorías fuera de esta lista.
-
-LISTA DE ENLACES Y TEMAS QUE EL USUARIO YA TIENE GUARDADOS EN SU BIBLIOTECA:
-${existingThemesSummary || '(La biblioteca está vacía)'}
-
-OBJETIVOS CRÍTICOS:
-1. "title": 
-   - Si el reel o enlace tiene un título o una frase inicial clara en su descripción/caption, ponlo como título (por ejemplo: "Mis credenciales no aparecen 🤠" o "Receta de tarta casera").
-   - Si no hay título directo, genera un título claro, directo y específico del tema que trata (NUNCA un genérico "Reel de Instagram (código)" ni "Enlace guardado").
-2. "summary": 
-   - DEBES transcribir fielmente la descripción del reel/video ("Descripción transcrita del Reel: ..."), explicando a continuación de forma práctica y comprensible qué muestra, qué enseña o qué solución aporta en español (2 a 3 oraciones completas, sustanciales y claras).
-3. "category": 
-   - DEPENDIENDO ESTRICTAMENTE DE LO QUE APAREZCA EN LA DESCRIPCIÓN Y EN EL RESUMEN, Y APOYÁNDOTE EN LAS DESCRIPCIONES DE CADA CATEGORÍA, asigna OBLIGATORIAMENTE la categoría MÁS ADECUADA de la lista: [${validCategoriesList.join(', ')}].
-   - Si ninguna categoría encaja razonablemente, selecciona "${validCategoriesList[0] || 'Sin categorías'}".
-4. "keyTakeaways": 
-   - Lista de 3 a 4 puntos clave, aprendizajes o consejos accionables destacados extraídos directamente de la descripción y contenido del reel.
-5. "tags": 
-   - Lista de 3 a 5 etiquetas o hashtags reales de la descripción (sin el símbolo #).
-6. "estimatedTime": 
-   - Estimación rápida (ej: "${meta.duration || 'Reel 60s'}", "Video 2 min", "Lectura 3 min").
-7. "authorOrChannel": 
-   - Handle o nombre del creador (ej: "${meta.author || '@creador'}"), o cadena vacía si no se sabe.
-8. "duplicateCheck":
-   - isDuplicateTopic: true SI y solo SI existe un enlace guardado que trata exactamente la misma receta, la misma técnica específica, o el mismo tutorial específico.
-   - REGLA CRÍTICA: Si son videos o Reels con identificadores distintos y no hay evidencia clara de que traten exactamente el mismo tema, NO son duplicados (isDuplicateTopic DEBE ser false, similarityScore < 30).
-   - duplicateReason: Razón explicativa amable en español.
-   - similarExistingTitle: Título del enlace existente más parecido, o null.
-   - similarExistingId: ID del enlace existente más parecido, o null.
-   - similarityScore: De 0 a 100.
-
-Responde estrictamente con la estructura JSON solicitada.
-`;
-
-    let aiResult: any = null;
-
-    // Prioritize gemini-3.1-flash-lite for lowest latency, high throughput and zero 503 spikes.
-    // Fall back to gemini-3.8-flash and gemini-flash-latest if needed.
-    const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
-    const ai = getGenAI();
-
-    for (const modelName of candidateModels) {
-      let modelSucceeded = false;
-      // Up to 2 attempts per model with backoff if encountering 503 UNAVAILABLE or rate limits
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents: prompt,
-            config: {
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  summary: { type: Type.STRING },
-                  keyTakeaways: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                  },
-                  category: { type: Type.STRING },
-                  tags: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                  },
-                  estimatedTime: { type: Type.STRING },
-                  authorOrChannel: { type: Type.STRING },
-                  duplicateCheck: {
-                    type: Type.OBJECT,
-                    properties: {
-                      isDuplicateTopic: { type: Type.BOOLEAN },
-                      duplicateReason: { type: Type.STRING },
-                      similarExistingTitle: { type: Type.STRING },
-                      similarExistingId: { type: Type.STRING },
-                      similarityScore: { type: Type.INTEGER },
-                    },
-                    required: ['isDuplicateTopic', 'duplicateReason', 'similarityScore'],
-                  },
-                },
-                required: ['title', 'summary', 'keyTakeaways', 'category', 'tags', 'duplicateCheck'],
-              },
-            },
-          });
-
-          const text = response.text || '{}';
-          aiResult = JSON.parse(text);
-          if (aiResult && aiResult.title) {
-            console.log(`[Gemini] Link analyzed successfully using ${modelName}`);
-            modelSucceeded = true;
-            break;
-          }
-        } catch (err: any) {
-          const errMsg = String(err?.message || '');
-          const isBusyOrRateLimit = errMsg.includes('503') || errMsg.includes('429') || errMsg.includes('UNAVAILABLE') || err?.status === 'UNAVAILABLE';
-          if (isBusyOrRateLimit && attempt === 1) {
-            await new Promise((resolve) => setTimeout(resolve, 650));
-            continue;
-          }
-          console.log(`[Gemini] Model ${modelName} temporary spike, falling back to next candidate...`);
-          break;
-        }
-      }
-
-      if (modelSucceeded && aiResult && aiResult.title) {
-        break;
-      }
-    }
-
-    if (!aiResult) {
-      // Intelligent fallback when Gemini is unavailable
-      const hashtags = extractHashtags(effectiveCaption);
-      const assignedCategory = categorizeByContent(`${effectiveCaption} ${suggestedTitle} ${userNote || ''}`, categoryObjects);
-
-      let fallbackTitle = suggestedTitle;
-      if (!fallbackTitle && effectiveCaption) {
-        const firstLine = effectiveCaption.split('\n')[0].replace(/#\S+/g, '').trim();
-        fallbackTitle = firstLine.length >= 4 ? firstLine.slice(0, 80) : '';
-      }
-      if (!fallbackTitle) {
-        fallbackTitle = `${platform.toUpperCase()} - ${cleanInputUrl.split('/').filter(Boolean).pop() || 'Enlace guardado'}`;
-      }
-
-      let fallbackSummary = '';
-      if (effectiveCaption) {
-        fallbackSummary = `Descripción transcrita del Reel: "${effectiveCaption}". Video y contenido archivado para consulta rápida.`;
-      } else {
-        fallbackSummary = meta.description || `Enlace guardado de ${platform}. Contenido archivado para consulta posterior.`;
-      }
-
-      const fallbackTakeaways = effectiveCaption
-        ? [
-            `Transcripción de la descripción: ${effectiveCaption.slice(0, 110)}...`,
-            `Categorizado automáticamente en "${assignedCategory}" en base al contenido del reel.`,
-            `Autor / Creador: ${meta.author || '@creador'} (${platform.toUpperCase()})`
-          ]
-        : [
-            'Enlace guardado en la biblioteca para consulta rápida',
-            `Plataforma de origen: ${platform}`,
-            'Listo para revisar o volver a analizar con IA'
-          ];
-
-      aiResult = {
-        title: fallbackTitle,
-        summary: fallbackSummary,
-        keyTakeaways: fallbackTakeaways,
-        category: assignedCategory,
-        tags: hashtags.length > 0 ? hashtags.slice(0, 5) : [platform, 'Guardado'],
-        estimatedTime: meta.duration || (platform === 'web' ? 'Lectura 3 min' : 'Reel 60s'),
-        authorOrChannel: meta.author || '',
-        duplicateCheck: {
-          isDuplicateTopic: false,
-          duplicateReason: 'No se detectó duplicado temático en el análisis inicial.',
-          similarityScore: 0,
-        },
-      };
-    }
-
-    // Strictly enforce that the categorized result belongs to the registered categories
-    let finalCategory = (aiResult.category || '').trim();
-    const exactCategoryMatch = validCategoriesList.find(
-      (c) => c.toLowerCase() === finalCategory.toLowerCase()
-    );
-    if (exactCategoryMatch) {
-      finalCategory = exactCategoryMatch;
-    } else {
-      // Find the best semantic match from registered categories rather than blindly defaulting
-      finalCategory = categorizeByContent(`${aiResult.summary} ${aiResult.title} ${effectiveCaption}`, categoryObjects);
-    }
-
-    const payload = {
-      platform,
-      title: aiResult.title || suggestedTitle || 'Enlace guardado',
-      summary: aiResult.summary || meta.description || 'Sin resumen disponible',
-      keyTakeaways: Array.isArray(aiResult.keyTakeaways) && aiResult.keyTakeaways.length > 0 
-        ? aiResult.keyTakeaways 
-        : ['Contenido guardado para consulta'],
-      category: finalCategory,
-      tags: Array.isArray(aiResult.tags) && aiResult.tags.length > 0 
-        ? aiResult.tags 
-        : (meta.tags && meta.tags.length > 0 ? meta.tags : [platform]),
-      estimatedTime: aiResult.estimatedTime || meta.duration || (platform === 'web' ? 'Lectura' : 'Video'),
-      authorOrChannel: aiResult.authorOrChannel || meta.author || '',
-      thumbnailUrl: meta.ogImage || undefined,
-      duplicateCheck: aiResult.duplicateCheck || {
-        isDuplicateTopic: false,
-        similarityScore: 0,
-      },
-      exactDuplicateFound: exactMatch ? {
-        id: exactMatch.id,
-        title: exactMatch.title,
-        url: exactMatch.url,
-      } : undefined,
-    };
+    const hasKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 5);
 
     return res.json({
       success: true,
-      data: payload,
+      data,
+      geminiKeyMissing: !hasKey || Boolean(data.geminiKeyMissing),
+      aiProcessed: Boolean(data.aiProcessed),
     });
   } catch (error: any) {
     console.error('Error analyzing link:', error);

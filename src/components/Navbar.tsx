@@ -1,9 +1,10 @@
 import React from 'react';
-import { Bookmark, Sparkles, Plus, AlertTriangle } from 'lucide-react';
+import { Bookmark, Sparkles, Plus, AlertTriangle, KeyRound } from 'lucide-react';
 import { SavedLinkItem } from '../types';
 import { PWAInstallButton } from './PWAInstallButton';
 import { UserMenu } from './UserMenu';
 import { APP_VERSION } from '../constants/version';
+import { useAiStatus } from '../services/aiStatusService';
 
 interface NavbarProps {
   items: SavedLinkItem[];
@@ -15,6 +16,7 @@ interface NavbarProps {
   onOpenEditProfile?: () => void;
   onOpenUsersManagement?: () => void;
   onOpenSettings?: () => void;
+  onOpenGeminiGuide?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -27,7 +29,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenEditProfile,
   onOpenUsersManagement,
   onOpenSettings,
+  onOpenGeminiGuide,
 }) => {
+  const { isKeyMissing } = useAiStatus();
   const duplicateCount = items.filter(
     (i) => i.duplicateCheck?.isDuplicateTopic || i.isExactDuplicateOf
   ).length;
@@ -42,13 +46,26 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Bookmark className="w-5 h-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <h1 className="text-base font-bold text-neutral-900 tracking-tight leading-tight">
                 ReewAI
               </h1>
-              <span className="text-[10px] font-semibold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-200">
-                IA
-              </span>
+              {isKeyMissing ? (
+                <button
+                  id="btn-nav-gemini-alert-mobile"
+                  type="button"
+                  onClick={onOpenGeminiGuide}
+                  className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300 animate-pulse"
+                  title="GEMINI_API_KEY no configurada en Netlify. Pulsa para ver guía."
+                >
+                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                  <span>Sin GEMINI_API_KEY</span>
+                </button>
+              ) : (
+                <span className="text-[10px] font-semibold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-200">
+                  IA
+                </span>
+              )}
               <span className="text-[9px] font-mono font-medium text-neutral-400 bg-neutral-100 px-1.5 py-0.5 rounded border border-neutral-200/80">
                 {APP_VERSION}
               </span>
@@ -115,10 +132,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span>ReewAI</span>
                 <span className="text-xs sm:text-sm font-normal text-neutral-500">(Reel & Web Saver AI)</span>
               </h1>
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full border border-violet-200">
-                <Sparkles className="w-3 h-3 text-violet-600" />
-                Multi-usuario + IA
-              </span>
+              {isKeyMissing ? (
+                <button
+                  id="btn-nav-gemini-alert-desktop"
+                  type="button"
+                  onClick={onOpenGeminiGuide}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 px-2.5 py-0.5 rounded-full border border-amber-300 shadow-2xs transition-colors cursor-pointer"
+                  title="Falta configurar GEMINI_API_KEY en Netlify. Haz clic para ver cómo configurarlo."
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                  <span>Falta GEMINI_API_KEY en Netlify</span>
+                </button>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full border border-violet-200">
+                  <Sparkles className="w-3 h-3 text-violet-600" />
+                  Multi-usuario + IA
+                </span>
+              )}
               <span className="inline-flex items-center text-[10px] font-mono font-medium text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded-full border border-neutral-200/80">
                 {APP_VERSION}
               </span>

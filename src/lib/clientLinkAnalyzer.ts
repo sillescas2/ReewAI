@@ -161,24 +161,20 @@ export async function analyzeLinkClientFallback(
 
   let category = allowedCategories[0] || 'Sin categorías';
   let estimatedTime = 'Lectura 3 min';
-  let sampleThumbnail = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&auto=format&fit=crop&q=60';
+  let sampleThumbnail: string | undefined = undefined;
   let tags: string[] = [];
 
   if (platform === 'instagram') {
     estimatedTime = 'Reel 45s';
-    sampleThumbnail = 'https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=500&auto=format&fit=crop&q=60';
     tags = ['Instagram', 'Reel'];
   } else if (platform === 'facebook') {
     estimatedTime = 'Reel 50s';
-    sampleThumbnail = 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=500&auto=format&fit=crop&q=60';
     tags = ['Facebook', 'Reel'];
   } else if (platform === 'tiktok') {
     estimatedTime = 'Video 60s';
-    sampleThumbnail = 'https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=500&auto=format&fit=crop&q=60';
     tags = ['TikTok', 'Video'];
   } else if (platform === 'youtube') {
     estimatedTime = 'Video 3 min';
-    sampleThumbnail = 'https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=500&auto=format&fit=crop&q=60';
     tags = ['YouTube', 'Video'];
   } else {
     tags = ['Web', 'Lectura', domain];
@@ -195,25 +191,24 @@ export async function analyzeLinkClientFallback(
   if (combinedText.includes('receta') || combinedText.includes('cocina') || combinedText.includes('pizza') || combinedText.includes('comida') || combinedText.includes('pasta') || combinedText.includes('postre')) {
     category = findMatchingAllowed(['receta', 'cocina', 'gastronomia']) || allowedCategories[0] || 'Cocina y Recetas';
     tags.push('Cocina', 'Recetas');
-    sampleThumbnail = 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=500&auto=format&fit=crop&q=60';
   } else if (combinedText.includes('marketing') || combinedText.includes('creador') || combinedText.includes('gancho') || combinedText.includes('retencion') || combinedText.includes('algoritmo') || combinedText.includes('ventas') || combinedText.includes('vender')) {
     category = findMatchingAllowed(['marketing', 'ventas', 'negocios']) || allowedCategories[0] || 'Marketing Digital';
     tags.push('Marketing', 'Estrategia', 'Crecimiento');
-    sampleThumbnail = 'https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=500&auto=format&fit=crop&q=60';
   } else if (combinedText.includes('ai') || combinedText.includes('ia') || combinedText.includes('tech') || combinedText.includes('router') || combinedText.includes('wifi') || combinedText.includes('informatica') || combinedText.includes('codigo') || combinedText.includes('software')) {
     category = findMatchingAllowed(['tecnolog', 'ia', 'informatica', 'software']) || allowedCategories[0] || 'Tecnología e IA';
     tags.push('Tecnología', 'Informática');
-    sampleThumbnail = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&auto=format&fit=crop&q=60';
   } else if (combinedText.includes('ahorro') || combinedText.includes('banco') || combinedText.includes('dinero') || combinedText.includes('finanza') || combinedText.includes('inversion') || combinedText.includes('cripto')) {
     category = findMatchingAllowed(['finanz', 'dinero', 'invers']) || allowedCategories[0] || 'Finanzas e Inversión';
     tags.push('Finanzas', 'Ahorro', 'Inversión');
-    sampleThumbnail = 'https://images.unsplash.com/photo-1579621970563-ebec7560ff3e?w=500&auto=format&fit=crop&q=60';
   } else if (combinedText.includes('habito') || combinedText.includes('rutina') || combinedText.includes('tiempo') || combinedText.includes('productiv') || combinedText.includes('organizacion')) {
     category = findMatchingAllowed(['productiv', 'habito', 'organiz']) || allowedCategories[0] || 'Productividad & Hábitos';
     tags.push('Productividad', 'Hábitos');
   } else if (combinedText.includes('fitness') || combinedText.includes('gym') || combinedText.includes('salud') || combinedText.includes('ejercicio') || combinedText.includes('entrenamiento')) {
     category = findMatchingAllowed(['salud', 'fitness', 'deporte']) || allowedCategories[0] || 'Fitness y Salud';
     tags.push('Fitness', 'Salud');
+  } else if (combinedText.includes('ferrata') || combinedText.includes('escalada') || combinedText.includes('montana') || combinedText.includes('ruta') || combinedText.includes('cuenca') || combinedText.includes('climbing')) {
+    category = findMatchingAllowed(['ruta', 'senderismo', 'montana', 'deporte']) || allowedCategories[0] || 'Rutas y Senderismo';
+    tags.push('Senderismo', 'Escalada');
   } else {
     category = allowedCategories[0] || 'Sin categorías';
   }
@@ -256,11 +251,11 @@ export async function analyzeLinkClientFallback(
   // Derive summary prioritizing manualSummary
   let summary = '';
   if (manualSummary && manualSummary.trim().length >= 4) {
-    summary = `Descripción transcrita del Reel: "${manualSummary.trim()}". Categorizado en ${category} para consulta rápida.`;
+    summary = `Descripción transcrita: "${manualSummary.trim()}". Categorizado en ${category} para consulta rápida.`;
   } else if (userNote && userNote.trim().length >= 4) {
     summary = `Contenido enfocado en: "${userNote.trim()}". Guardado con notas y categorizado como ${category} para consulta rápida.`;
   } else if (mediaId) {
-    summary = `Video Reel de ${platform === 'instagram' ? 'Instagram' : platform} [ID: ${mediaId}]. Guardado en tu biblioteca para consulta rápida y referencia.`;
+    summary = `Video Reel de ${platform === 'instagram' ? 'Instagram' : platform} [ID: ${mediaId}]. Guardado en biblioteca. (Aviso: Si estás en Netlify, asegúrate de activar Netlify Functions y GEMINI_API_KEY para transcripción automática con IA).`;
   } else {
     summary = `Recurso guardado desde ${domain || platform}. Contenido indexado para acceso rápido y consulta en tus proyectos.`;
   }

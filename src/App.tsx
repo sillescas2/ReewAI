@@ -14,6 +14,8 @@ import { AuthLandingScreen } from './components/AuthLandingScreen';
 import { EditProfileModal } from './components/EditProfileModal';
 import { UsersManagementView } from './components/UsersManagementView';
 import { SettingsView } from './components/SettingsView';
+import { AiStatusBanner } from './components/AiStatusBanner';
+import { NetlifyGeminiModal } from './components/NetlifyGeminiModal';
 import { useAuth } from './context/AuthContext';
 import { USER_SAMPLE_DATA } from './data/sampleData';
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
@@ -62,6 +64,7 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
+  const [isGeminiModalOpen, setIsGeminiModalOpen] = useState(false);
 
   // User's custom categories (Name and Color)
   const [userCategories, setUserCategories] = useState<CategoryItem[]>([]);
@@ -332,7 +335,7 @@ export default function App() {
   // Update item handler (for note, category, title, summary, etc.) - Central Database First
   const handleUpdateItem = async (
     id: string,
-    updates: { userNote?: string; category?: string; title?: string; summary?: string }
+    updates: Partial<SavedLinkItem>
   ) => {
     if (!user) return;
     const updated = items.map((i) => (i.id === id ? { ...i, ...updates } : i));
@@ -359,6 +362,10 @@ export default function App() {
           if (updates.category !== undefined) supaUpdates.category = updates.category;
           if (updates.title !== undefined) supaUpdates.title = updates.title;
           if (updates.summary !== undefined) supaUpdates.summary = updates.summary;
+          if (updates.keyTakeaways !== undefined) supaUpdates.key_takeaways = updates.keyTakeaways;
+          if (updates.tags !== undefined) supaUpdates.tags = updates.tags;
+          if (updates.authorOrChannel !== undefined) supaUpdates.author_or_channel = updates.authorOrChannel;
+          if (updates.thumbnailUrl !== undefined) supaUpdates.thumbnail_url = updates.thumbnailUrl;
 
           if (Object.keys(supaUpdates).length > 0) {
             await supabase.from('saved_links').update(supaUpdates).eq('id', id);
@@ -682,7 +689,11 @@ export default function App() {
         onOpenEditProfile={() => setIsEditProfileModalOpen(true)}
         onOpenUsersManagement={() => setCurrentView('users')}
         onOpenSettings={() => setCurrentView('settings')}
+        onOpenGeminiGuide={() => setIsGeminiModalOpen(true)}
       />
+
+      {/* Real-time notification if GEMINI_API_KEY is not configured in Netlify */}
+      <AiStatusBanner onOpenGuide={() => setIsGeminiModalOpen(true)} />
 
       {/* Floating Toast Notification for Imports */}
       {importToastMessage && (
@@ -702,6 +713,7 @@ export default function App() {
             onAddCategory={handleAddCategory}
             onUpdateCategory={handleUpdateCategory}
             onDeleteCategory={handleDeleteCategory}
+            onOpenGeminiGuide={() => setIsGeminiModalOpen(true)}
           />
           {/* Bottom safety clearance for fixed badges */}
           <div className="h-16 w-full pointer-events-none" aria-hidden="true" />
@@ -815,6 +827,7 @@ export default function App() {
         initialUrl={sharedUrl}
         initialNote={sharedNote}
         categories={userCategories}
+        onOpenGeminiGuide={() => setIsGeminiModalOpen(true)}
       />
 
       {selectedItemForDetail && (
@@ -828,8 +841,15 @@ export default function App() {
           allItems={items}
           categories={userCategories}
           categoryColors={categoryColors}
+          onOpenGeminiGuide={() => setIsGeminiModalOpen(true)}
         />
       )}
+
+      {/* Netlify Gemini API Key Setup Modal */}
+      <NetlifyGeminiModal
+        isOpen={isGeminiModalOpen}
+        onClose={() => setIsGeminiModalOpen(false)}
+      />
 
       {/* Delete Confirmation Dialog - Infaliable & Accessible */}
       <DeleteConfirmModal
