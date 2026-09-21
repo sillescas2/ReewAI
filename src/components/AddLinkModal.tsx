@@ -39,6 +39,7 @@ interface AddLinkModalProps {
   onSaveItem: (item: SavedLinkItem) => void;
   existingItems: SavedLinkItem[];
   initialUrl?: string;
+  initialNote?: string;
   categories?: CategoryItem[];
 }
 
@@ -48,12 +49,13 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
   onSaveItem,
   existingItems,
   initialUrl = '',
+  initialNote = '',
   categories = [],
 }) => {
   const [url, setUrl] = useState(initialUrl || '');
   const [manualTitle, setManualTitle] = useState('');
   const [manualSummary, setManualSummary] = useState('');
-  const [userNote, setUserNote] = useState('');
+  const [userNote, setUserNote] = useState(initialNote || '');
   const [manualCategory, setManualCategory] = useState<string>('auto');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<string>('');
@@ -96,10 +98,11 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
       setErrorMessage(null);
       setUserIgnoredDuplicate(false);
       setExactDuplicateFound(null);
-    } else if (initialUrl) {
-      setUrl(initialUrl);
+    } else {
+      if (initialUrl) setUrl(initialUrl);
+      if (initialNote) setUserNote(initialNote);
     }
-  }, [isOpen, initialUrl]);
+  }, [isOpen, initialUrl, initialNote]);
 
   // Check URL as user types
   useEffect(() => {

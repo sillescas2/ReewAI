@@ -21,7 +21,7 @@ function normalizeUrl(rawUrl: string | undefined | null): string {
     // Remove common tracking query params
     const trackingParams = [
       'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-      'igsh', 'mibextid', 'fbclid', 'gclid', 'si', 'feature', 'ref', 'source'
+      'igsh', 'stkn', 'mibextid', 'fbclid', 'gclid', 'si', 'feature', 'ref', 'source'
     ];
     trackingParams.forEach((param) => parsed.searchParams.delete(param));
     
@@ -74,6 +74,23 @@ function decodeUnicodeEscapes(str: string): string {
   if (!str) return '';
   try {
     return str.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+  } catch {
+    return str;
+  }
+}
+
+// Decode HTML entities commonly returned in OpenGraph meta tags
+function decodeHtmlEntities(str: string): string {
+  if (!str) return '';
+  try {
+    return str
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+      .replace(/&#([0-9]+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&apos;/g, "'");
   } catch {
     return str;
   }
@@ -144,6 +161,7 @@ function categorizeByContent(
 
   // 3. Topic keyword mapping to registered categories
   const topicKeywords: Record<string, string[]> = {
+    senderismo: ['senderismo', 'ruta', 'montana', 'hiking', 'trekking', 'desnivel', 'huesca', 'pirineos', 'sierra', 'escapada', 'trail', 'naturaleza'],
     tecnologia: ['wifi', 'router', 'informatica', 'it', 'ingenieria', 'codigo', 'tech', 'ia', 'software', 'hardware', 'servidor', 'python', 'javascript', 'pc', 'computadora', 'redes', 'ip', 'programacion', 'credenciales'],
     recetas: ['receta', 'cocina', 'cocinar', 'ingredientes', 'pizza', 'comida', 'pasta', 'postre', 'cena', 'almuerzo', 'desayuno', 'sabor', 'tarta', 'horno', 'chef'],
     marketing: ['marketing', 'ventas', 'vender', 'leads', 'redes sociales', 'crecimiento', 'audiencia', 'gancho', 'retencion', 'negocio', 'empresa', 'estrategia', 'copywriting'],
@@ -162,6 +180,7 @@ function categorizeByContent(
         return (
           normName.includes(topic) ||
           normDesc.includes(topic) ||
+          (topic === 'senderismo' && (normName.includes('ruta') || normName.includes('viaje') || normName.includes('deporte') || normName.includes('montana'))) ||
           (topic === 'tecnologia' && (normName.includes('ia') || normName.includes('software') || normName.includes('informatica')))
         );
       });
@@ -174,15 +193,89 @@ function categorizeByContent(
   return nonDefault ? nonDefault.name : normalizedCategories[0].name;
 }
 
-// Extract Instagram metadata using captioned mobile embed
+// Extract Instagram metadata using OpenGraph crawler & captioned embed
 async function fetchInstagramMeta(url: string): Promise<ExtractedMediaInfo | null> {
   const match = url.match(/(?:reel|reels|p|tv)\/([A-Za-z0-9_-]+)/i);
   if (!match) return null;
   const shortcode = match[1];
-  const embedUrl = `https://www.instagram.com/reel/${shortcode}/embed/captioned/`;
 
+  // 1. PRIMARY STRATEGY: Fetch main reel page via Facebook/Twitter crawler User-Agent
+  // Instagram serves complete OpenGraph data (caption, thumbnail, author) to verified crawler headers without requiring login.
+  try {
+    const mainUrl = `https://www.instagram.com/reel/${shortcode}/`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
+
+    const res = await fetch(mainUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+      },
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const html = await res.text();
+      const ogTitleMatch = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
+        html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
+      const ogDescMatch = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i) ||
+        html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i);
+      const ogImageMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+        html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+
+      const rawTitle = decodeHtmlEntities(ogTitleMatch ? ogTitleMatch[1] : '');
+      const rawDesc = decodeHtmlEntities(ogDescMatch ? ogDescMatch[1] : '');
+      const rawImage = decodeHtmlEntities(ogImageMatch ? ogImageMatch[1] : '');
+
+      let caption = '';
+      let author = '';
+
+      // Extract author from handle or metadata
+      const authorMatch = rawDesc.match(/-\s+([a-zA-Z0-9._]+)\s+(?:on|el)\s+/i) ||
+        rawTitle.match(/([a-zA-Z0-9._]+)\s+(?:on|en)\s+Instagram/i);
+      if (authorMatch) {
+        author = `@${authorMatch[1].trim()}`;
+      }
+
+      // Extract caption from quoted text
+      const quoteMatch = rawTitle.match(/(?:on|en)\s+Instagram:\s*[“"]([\s\S]+?)[”"]\s*$/i) ||
+        rawTitle.match(/:\s*[“"]([\s\S]+?)[”"]\s*$/i) ||
+        rawDesc.match(/:\s*[“"]([\s\S]+?)[”"]\s*$/i);
+      if (quoteMatch) {
+        caption = quoteMatch[1].trim();
+      } else if (rawDesc && !rawDesc.toLowerCase().includes('create an account') && !rawDesc.toLowerCase().includes('log in to instagram')) {
+        caption = rawDesc.trim();
+      }
+
+      if (caption) {
+        // Normalize stylized/mathematical fonts (e.g. 𝔼𝕊ℂ𝔸𝕃𝔼ℝ𝔼𝕋𝔸𝕊 -> ESCALERETAS) for clean reading and search
+        caption = caption.normalize('NFKD').trim();
+        const firstLine = caption.split('\n')[0].replace(/#\S+/g, '').trim();
+        const derivedTitle = firstLine.length >= 4 ? firstLine.slice(0, 85) : caption.slice(0, 85);
+        const tags = extractHashtags(caption);
+
+        return {
+          title: derivedTitle,
+          description: caption,
+          caption,
+          author: author || 'Creador de Instagram',
+          ogImage: rawImage,
+          duration: 'Reel 60s',
+          tags: tags.length > 0 ? tags : ['Instagram', 'Reel'],
+          source: 'instagram_crawler',
+        };
+      }
+    }
+  } catch (err) {
+    // Continue to fallback
+  }
+
+  // 2. SECONDARY FALLBACK: Captioned mobile embed
+  const embedUrl = `https://www.instagram.com/reel/${shortcode}/embed/captioned/`;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 4500);
+  const timeoutId = setTimeout(() => controller.abort(), 4000);
 
   try {
     const response = await fetch(embedUrl, {
@@ -203,7 +296,7 @@ async function fetchInstagramMeta(url: string): Promise<ExtractedMediaInfo | nul
     let ogImage = '';
     let duration = 'Reel 60s';
 
-    // 1. Caption extraction from embedded JSON edge_media_to_caption
+    // Caption extraction from embedded JSON edge_media_to_caption
     const captionIdx = html.indexOf('edge_media_to_caption');
     if (captionIdx !== -1) {
       const sub = html.substring(captionIdx, captionIdx + 1200);
@@ -221,7 +314,7 @@ async function fetchInstagramMeta(url: string): Promise<ExtractedMediaInfo | nul
       }
     }
 
-    // 2. Author extraction
+    // Author extraction
     const userParamMatch = html.match(/username=([a-zA-Z0-9._-]+)/i);
     const userJsonMatch = html.match(/username["\\]+:\s*["\\]+([^"\\]+)/i);
     const userSpanMatch = html.match(/class="UsernameText"[^>]*>([^<]+)<\/span>/i);
@@ -233,20 +326,18 @@ async function fetchInstagramMeta(url: string): Promise<ExtractedMediaInfo | nul
       author = `@${userSpanMatch[1].trim()}`;
     }
 
-    // 3. Thumbnail extraction
+    // Thumbnail extraction
     const imgMatch = html.match(/display_url["\\]+:\s*["\\]+([^"]+?)(?:\\?"|&quot;)/) || html.match(/class="EmbeddedMediaImage"[^>]*src="([^"]+)"/);
     if (imgMatch) {
       ogImage = imgMatch[1].replace(/\\+\//g, '/').replace(/\\+/g, '').replace(/&amp;/g, '&');
     }
 
-    // 4. Video duration
     const durMatch = html.match(/video_duration["\\]+:\s*([0-9.]+)/);
     if (durMatch) {
       const sec = Math.round(parseFloat(durMatch[1]));
       duration = sec < 60 ? `Reel ${sec}s` : `Reel ${Math.floor(sec / 60)}m ${sec % 60}s`;
     }
 
-    // Derive a clean title from caption if available
     let title = '';
     if (caption) {
       const firstLine = caption.split('\n')[0].replace(/#\S+/g, '').trim();

@@ -56,6 +56,7 @@ export default function App() {
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [sharedUrl, setSharedUrl] = useState('');
+  const [sharedNote, setSharedNote] = useState('');
   const [selectedItemForDetail, setSelectedItemForDetail] = useState<SavedLinkItem | null>(null);
   const [itemPendingDelete, setItemPendingDelete] = useState<SavedLinkItem | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -105,17 +106,27 @@ export default function App() {
       const titleParam = params.get('title') || '';
 
       let foundUrl = '';
-      const rawCombined = `${urlParam} ${textParam} ${titleParam}`;
+      let remainingText = '';
+      const rawCombined = `${urlParam} ${textParam} ${titleParam}`.trim();
       const urlMatch = rawCombined.match(/(https?:\/\/[^\s]+)/i);
 
       if (urlMatch && urlMatch[1]) {
         foundUrl = urlMatch[1];
+        remainingText = rawCombined
+          .replace(foundUrl, '')
+          .replace(/https?:\/\/[^\s]+/g, '')
+          .replace(/^(Mira este reel en Instagram|Mira este reel|Check out this reel):?/i, '')
+          .trim();
       } else if (urlParam && urlParam.startsWith('http')) {
         foundUrl = urlParam;
+        remainingText = `${textParam} ${titleParam}`.trim();
       }
 
       if (foundUrl) {
         setSharedUrl(foundUrl);
+        if (remainingText && remainingText.length > 2) {
+          setSharedNote(remainingText);
+        }
         setIsAddModalOpen(true);
         window.history.replaceState({}, document.title, window.location.pathname);
       }
@@ -797,10 +808,12 @@ export default function App() {
         onClose={() => {
           setIsAddModalOpen(false);
           setSharedUrl('');
+          setSharedNote('');
         }}
         onSaveItem={handleSaveItem}
         existingItems={items}
         initialUrl={sharedUrl}
+        initialNote={sharedNote}
         categories={userCategories}
       />
 

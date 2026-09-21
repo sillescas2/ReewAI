@@ -210,22 +210,83 @@ export const LinkDetailModal: React.FC<LinkDetailModalProps> = ({
       >
         {/* Header - Fixed on top, guaranteed visibility on all devices */}
         <div className="px-4 sm:px-6 py-3.5 border-b border-neutral-200 flex items-center justify-between bg-white shrink-0 gap-2">
-          <div className="min-w-0 flex items-center gap-2">
-            <span
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border shrink-0 ${platformInfo.badgeClass}`}
-            >
-              <span className="hidden sm:inline">{platformInfo.name}</span>
-              <span className="sm:hidden">{platformInfo.shortName}</span>
-            </span>
-            {item.authorOrChannel && (
-              <span className="text-xs text-neutral-600 font-medium truncate max-w-[120px] sm:max-w-[200px]">
-                {item.authorOrChannel}
-              </span>
+          {/* Categoría y Cambiar categoría en la parte superior */}
+          <div className="min-w-0 flex items-center gap-2 flex-wrap">
+            {!isEditingCategory ? (
+              <div className="inline-flex items-center gap-2">
+                <span
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold border inline-flex items-center gap-1.5 shadow-2xs transition-all shrink-0"
+                  style={{
+                    backgroundColor: currentCatColor ? `${currentCatColor}18` : undefined,
+                    color: currentCatColor || undefined,
+                    borderColor: currentCatColor ? `${currentCatColor}40` : undefined,
+                  }}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: currentCatColor || '#6366f1' }}
+                  />
+                  <span className="truncate max-w-[120px] sm:max-w-[200px]">{item.category}</span>
+                </span>
+
+                <button
+                  id="btn-edit-category"
+                  type="button"
+                  onClick={() => setIsEditingCategory(true)}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-neutral-500 hover:text-indigo-700 hover:bg-indigo-50 border border-transparent hover:border-indigo-200/70 rounded-lg transition-colors cursor-pointer shrink-0"
+                  title="Cambiar la categoría de este enlace"
+                >
+                  <Tag className="w-3 h-3 text-neutral-400 shrink-0" />
+                  <span className="hidden sm:inline">Cambiar categoría</span>
+                  <span className="sm:hidden">Cambiar</span>
+                </button>
+
+                {categorySavedFeedback && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 animate-in fade-in shrink-0">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span className="hidden sm:inline">Categoría actualizada</span>
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="inline-flex items-center gap-1.5 bg-neutral-50 border border-neutral-300 p-1 sm:p-1.5 rounded-xl shadow-xs animate-in fade-in duration-150">
+                <Tag className="w-3.5 h-3.5 text-indigo-600 ml-1 shrink-0" />
+                <label htmlFor="select-change-category" className="sr-only">
+                  Seleccionar categoría
+                </label>
+                <select
+                  id="select-change-category"
+                  value={selectedCategory}
+                  onChange={(e) => {
+                    handleSaveCategory(e.target.value);
+                  }}
+                  className="text-xs font-semibold text-neutral-800 bg-white border border-neutral-200 rounded-lg px-2 py-1 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 cursor-pointer max-w-[130px] sm:max-w-[200px]"
+                >
+                  {(categories.length > 0
+                    ? categories
+                    : [
+                        { id: '1', name: item.category, color: '#6366f1' },
+                        { id: '2', name: 'General', color: '#64748b' },
+                        { id: '3', name: 'Tecnología', color: '#0ea5e9' },
+                        { id: '4', name: 'Negocios', color: '#10b981' },
+                        { id: '5', name: 'Recetas', color: '#f59e0b' },
+                      ]
+                  ).map((cat) => (
+                    <option key={cat.id} value={cat.name}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => setIsEditingCategory(false)}
+                  className="px-1.5 sm:px-2 py-1 text-xs text-neutral-500 hover:text-neutral-800 hover:bg-neutral-200/60 rounded-md font-medium cursor-pointer shrink-0"
+                >
+                  Cancelar
+                </button>
+              </div>
             )}
-            <span className="hidden sm:inline text-xs text-neutral-300">•</span>
-            <span className="hidden sm:inline text-xs text-neutral-400 whitespace-nowrap" title={formatDate(item.createdAt)}>
-              {formatTimeAgo(item.createdAt)}
-            </span>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -256,89 +317,33 @@ export const LinkDetailModal: React.FC<LinkDetailModalProps> = ({
 
         {/* Modal Content - The ONLY vertical scroll container */}
         <div className="p-4 sm:p-6 space-y-5 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">
-          {/* Category Selector / Display & Estimated Time */}
+          {/* Platform Info, Creator / Channel & Estimated Time */}
           <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-1 border-b border-neutral-100">
               <div className="flex items-center gap-2 flex-wrap">
-                {!isEditingCategory ? (
-                  <div className="inline-flex items-center gap-2">
-                    <span
-                      className="px-2.5 py-1 rounded-lg text-xs font-semibold border inline-flex items-center gap-1.5 shadow-2xs transition-all"
-                      style={{
-                        backgroundColor: currentCatColor ? `${currentCatColor}18` : undefined,
-                        color: currentCatColor || undefined,
-                        borderColor: currentCatColor ? `${currentCatColor}40` : undefined,
-                      }}
-                    >
-                      <span
-                        className="w-2 h-2 rounded-full shrink-0"
-                        style={{ backgroundColor: currentCatColor || '#6366f1' }}
-                      />
-                      <span>{item.category}</span>
-                    </span>
-
-                    <button
-                      id="btn-edit-category"
-                      type="button"
-                      onClick={() => setIsEditingCategory(true)}
-                      className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-neutral-500 hover:text-indigo-700 hover:bg-indigo-50 border border-transparent hover:border-indigo-200/70 rounded-lg transition-colors cursor-pointer"
-                      title="Cambiar la categoría de este enlace"
-                    >
-                      <Tag className="w-3 h-3 text-neutral-400" />
-                      <span>Cambiar categoría</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="inline-flex items-center gap-2 bg-neutral-50 border border-neutral-300 p-1.5 rounded-xl shadow-xs animate-in fade-in duration-150">
-                    <Tag className="w-3.5 h-3.5 text-indigo-600 ml-1 shrink-0" />
-                    <label htmlFor="select-change-category" className="sr-only">
-                      Seleccionar categoría
-                    </label>
-                    <select
-                      id="select-change-category"
-                      value={selectedCategory}
-                      onChange={(e) => {
-                        handleSaveCategory(e.target.value);
-                      }}
-                      className="text-xs font-semibold text-neutral-800 bg-white border border-neutral-200 rounded-lg px-2.5 py-1 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
-                    >
-                      {(categories.length > 0
-                        ? categories
-                        : [
-                            { id: '1', name: item.category, color: '#6366f1' },
-                            { id: '2', name: 'General', color: '#64748b' },
-                            { id: '3', name: 'Tecnología', color: '#0ea5e9' },
-                            { id: '4', name: 'Negocios', color: '#10b981' },
-                            { id: '5', name: 'Recetas', color: '#f59e0b' },
-                          ]
-                      ).map((cat) => (
-                        <option key={cat.id} value={cat.name}>
-                          {cat.name}
-                        </option>
-                      ))}
-                    </select>
-
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingCategory(false)}
-                      className="px-2 py-1 text-xs text-neutral-500 hover:text-neutral-800 hover:bg-neutral-200/60 rounded-md font-medium cursor-pointer"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
-                )}
-
-                {categorySavedFeedback && (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 animate-in fade-in">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                    Categoría actualizada
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border shrink-0 ${platformInfo.badgeClass}`}
+                >
+                  <span>{platformInfo.name}</span>
+                </span>
+                {item.authorOrChannel && (
+                  <span className="inline-flex items-center gap-1 text-xs text-neutral-700 font-medium bg-neutral-50 px-2 py-0.5 rounded-md border border-neutral-200/70">
+                    <span className="text-neutral-400 font-normal">Por</span>
+                    <span className="font-semibold text-neutral-900">{item.authorOrChannel}</span>
                   </span>
                 )}
+                <span className="text-xs text-neutral-300">•</span>
+                <span
+                  className="text-xs text-neutral-500 whitespace-nowrap"
+                  title={formatDate(item.createdAt)}
+                >
+                  {formatTimeAgo(item.createdAt)}
+                </span>
               </div>
 
               {item.estimatedTime && (
                 <span className="text-xs text-neutral-500 flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
+                  <Clock className="w-3 h-3 text-neutral-400" />
                   {item.estimatedTime}
                 </span>
               )}
