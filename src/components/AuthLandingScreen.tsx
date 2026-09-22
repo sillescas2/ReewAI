@@ -145,16 +145,21 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
         return;
       }
 
-      // Security measure: NEVER display the code on the screen or prefill it.
-      // The user must open their email, copy the 6-digit code, and enter it manually.
       setRecoveryCode('');
       setNewPassword('');
       setConfirmNewPassword('');
       setMode('reset-code');
-      setSuccessMessage(
-        res.message ||
-          `Hemos enviado un código de verificación de 6 dígitos a "${cleanEmail}". Por favor, abre tu correo, copia el código y pégalo a continuación.`
-      );
+
+      if (res.isSupabase) {
+        setSuccessMessage(
+          `Hemos enviado el correo oficial de Supabase a "${cleanEmail}". Abre tu correo y pulsa en "Restablecer contraseña". No necesitas buscar ningún código numérico.`
+        );
+      } else {
+        setSuccessMessage(
+          res.message ||
+            `Hemos enviado un código de verificación de 6 dígitos a "${cleanEmail}". Por favor, abre tu correo, copia el código y pégalo a continuación.`
+        );
+      }
     } catch (err: any) {
       setErrorMessage(err.message || 'Error al solicitar la recuperación.');
     } finally {

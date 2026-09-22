@@ -141,10 +141,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         error === 'access_denied' ||
         (errorDescription && errorDescription.toLowerCase().includes('expired'))
       ) {
+        const lastEmail = (typeof window !== 'undefined' && localStorage.getItem('reewai_last_recovery_email')) || '';
         setRecoveryFlow({
           isActive: true,
           type: 'expired-link',
           errorMessage: 'El enlace de recuperación ha caducado o ya ha sido utilizado.',
+          email: lastEmail,
         });
         try {
           const cleanUrl = window.location.pathname + window.location.search;
@@ -154,11 +156,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // Check for valid recovery token in URL
-      if (type === 'recovery' || (accessToken && type === 'recovery')) {
+      const code = searchParams.get('code') || hashParams.get('code');
+      const tokenHash = searchParams.get('token_hash') || hashParams.get('token_hash');
+
+      if (type === 'recovery' || (accessToken && type === 'recovery') || (code && type === 'recovery') || tokenHash) {
+        const lastEmail = (typeof window !== 'undefined' && localStorage.getItem('reewai_last_recovery_email')) || '';
         setRecoveryFlow((prev) => ({
           ...prev,
           isActive: true,
           type: 'set-new-password',
+          email: prev.email || lastEmail,
         }));
       }
     };
@@ -537,12 +544,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, error: 'Por favor, introduce un correo electrónico válido.' };
     }
 
+    // Persist email for easy prefilling in recovery screens
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('reewai_last_recovery_email', cleanEmail);
+      }
+    } catch (e) {}
+
     // Check if user exists in local availableUsers
     const existingUser = availableUsers.find(
       (u) => u.email.toLowerCase() === cleanEmail
     );
 
-    // If Supabase mode is configured
+    // If Supabase mode is configured, Supabase is the single source of truth
     if (isSupabase) {
       const supabase = getSupabaseClient();
       if (supabase) {
@@ -563,22 +577,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             };
           }
 
-          const msg = (error.message || '').toLowerCase();
-          if (msg.includes('user not found') || msg.includes('not found') || msg.includes('invalid user')) {
+          const msg = error.message || '';
+          const lower = msg.toLowerCase();
+          console.warn('Supabase resetPasswordForEmail error:', msg);
+
+          // Rate limiting (60-second cooldown in Supabase)
+          if (
+            lower.includes('rate limit') ||
+            lower.includes('once every') ||
+            lower.includes('security purposes') ||
+            lower.includes('seconds') ||
+            lower.includes('429')
+          ) {
             return {
               success: false,
-              error: `No existe ningún usuario registrado con el correo "${cleanEmail}". Por favor verifica la dirección o date de alta.`,
+              isSupabase: true,
+              error: 'Por motivos de seguridad, Supabase solo permite enviar un correo cada 60 segundos. Por favor, espera unos segundos antes de pulsar "Enviar nuevo enlace".',
             };
           }
 
-          console.warn('Supabase resetPasswordForEmail notice:', error.message);
+          // User not found in Supabase
+          if (
+            lower.includes('user not found') ||
+            lower.includes('not found') ||
+            lower.includes('invalid user')
+          ) {
+            return {
+              success: false,
+              isSupabase: true,
+              error: `No existe ninguna cuenta registrada con el correo "${cleanEmail}" en Supabase. Verifica que esté bien escrito o regístrate.`,
+            };
+          }
+
+          // Redirect URL configuration issues
+          if (lower.includes('redirect') || lower.includes('url')) {
+            return {
+              success: false,
+              isSupabase: true,
+              error: `Error de configuración en Supabase: la URL de redirección no está autorizada. ${msg}`,
+            };
+          }
+
+          // Any other error from Supabase
+          return {
+            success: false,
+            isSupabase: true,
+            error: msg || 'No se pudo enviar el correo de recuperación desde Supabase.',
+          };
         } catch (err: any) {
-          console.warn('Supabase reset exception, proceeding to verification code:', err);
+          console.error('Supabase reset exception:', err);
+          return {
+            success: false,
+            isSupabase: true,
+            error: err.message || 'Error de conexión con Supabase al solicitar recuperación.',
+          };
         }
       }
     }
 
-    // Built-in / Local / Central Database mode:
+    // Built-in / Local / Central Database mode (ONLY active when Supabase is NOT configured):
     const serverRes = await DatabaseService.requestPasswordReset(cleanEmail);
 
     if (serverRes.success) {
@@ -600,29 +657,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
     }
 
-    // If neither server nor local storage has this user
-    if (!existingUser && !serverRes.success) {
+    if (existingUser) {
+      const fallbackCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + 15 * 60 * 1000;
+      try {
+        sessionStorage.setItem(
+          `reewai_pwd_reset_${cleanEmail}`,
+          JSON.stringify({ code: fallbackCode, expiresAt })
+        );
+      } catch (e) {}
+
       return {
-        success: false,
-        error: `No existe ninguna cuenta registrada con el correo "${cleanEmail}". Verifica que esté bien escrito o date de alta.`,
+        success: true,
+        isSupabase: false,
+        expiresAt,
+        message: `Código de verificación generado para tu cuenta "${cleanEmail}". Escribe los 6 dígitos para restablecer tu contraseña.`,
       };
     }
 
-    // Standalone fallback: save in session storage for verification, but DO NOT show code on screen
-    const fallbackCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 15 * 60 * 1000;
-    try {
-      sessionStorage.setItem(
-        `reewai_pwd_reset_${cleanEmail}`,
-        JSON.stringify({ code: fallbackCode, expiresAt })
-      );
-    } catch (e) {}
-
+    // Neither exists
     return {
-      success: true,
-      isSupabase: false,
-      expiresAt,
-      message: `Código de verificación enviado para tu cuenta "${cleanEmail}". Revisa tu correo y escribe los 6 dígitos.`,
+      success: false,
+      error: `No existe ninguna cuenta registrada con el correo "${cleanEmail}". Verifica que esté bien escrito o date de alta.`,
     };
   };
 
@@ -646,7 +702,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
     }
 
-    // Verify code from session storage if present
+    // Verify code from session storage if present (offline/local fallback)
     let cachedData: { code: string; expiresAt: number } | null = null;
     try {
       const stored = sessionStorage.getItem(`reewai_pwd_reset_${cleanEmail}`);
@@ -655,7 +711,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (e) {}
 
-    if (cachedData) {
+    if (cachedData && !isSupabase) {
       if (Date.now() > cachedData.expiresAt) {
         sessionStorage.removeItem(`reewai_pwd_reset_${cleanEmail}`);
         return {
@@ -663,7 +719,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           error: 'El código de recuperación ha expirado. Por favor solicita uno nuevo.',
         };
       }
-      if (cachedData.code !== cleanCode && !isSupabase) {
+      if (cachedData.code !== cleanCode) {
         return {
           success: false,
           error: 'El código de recuperación es incorrecto. Verifica los 6 dígitos introducidos desde tu correo.',
@@ -685,13 +741,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (otpError) {
             console.warn('Supabase verifyOtp notice:', otpError.message);
-            // If cachedData didn't match either, return error
-            if (!cachedData || cachedData.code !== cleanCode) {
-              const friendlyOtpMsg = otpError.message.toLowerCase().includes('expired')
-                ? 'El código de verificación ha expirado. Por favor solicita uno nuevo.'
-                : 'El código de verificación es incorrecto o no coincide. Verifica los 6 dígitos recibidos en tu correo.';
-              return { success: false, error: friendlyOtpMsg };
-            }
+            const lower = otpError.message.toLowerCase();
+            const friendlyOtpMsg = lower.includes('expired')
+              ? 'El código de verificación ha expirado. Por favor solicita uno nuevo.'
+              : `El código de 6 dígitos es incorrecto o no coincide con tu correo: ${otpError.message}.`;
+            return { success: false, error: friendlyOtpMsg };
           }
 
           // Update password in Supabase
@@ -707,8 +761,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               error: `Problema con la clave: ${userFriendlyMsg}`,
             };
           }
+
+          try {
+            sessionStorage.removeItem(`reewai_pwd_reset_${cleanEmail}`);
+          } catch (e) {}
+
+          return {
+            success: true,
+            message: '¡Contraseña actualizada con éxito en Supabase! Ya puedes iniciar sesión con tu nueva clave.',
+          };
         } catch (e: any) {
           console.warn('Notice updating password in Supabase:', e);
+          return {
+            success: false,
+            error: e.message || 'Error de comunicación con Supabase.',
+          };
         }
       }
     }
