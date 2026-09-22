@@ -42,10 +42,30 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
 
   // Password Recovery States
   const [recoveryCode, setRecoveryCode] = useState('');
-  const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
-  const [copiedCode, setCopiedCode] = useState(false);
+
+  // Password security helpers
+  const passwordLen = newPassword.length;
+  const isMinLength = passwordLen >= 6;
+  const isGoodLength = passwordLen >= 8;
+  const hasNumbersOrSymbols = /[0-9\W]/.test(newPassword);
+  const hasLetters = /[a-zA-Z]/.test(newPassword);
+  const passwordsMatch = newPassword.length > 0 && confirmNewPassword.length > 0 && newPassword === confirmNewPassword;
+  const passwordsMismatch = newPassword.length > 0 && confirmNewPassword.length > 0 && newPassword !== confirmNewPassword;
+
+  const getPasswordStrength = (pwd: string) => {
+    if (!pwd) return { score: 0, text: 'Introduce una clave', color: 'bg-neutral-200', textClass: 'text-neutral-400' };
+    if (pwd.length < 6) return { score: 1, text: 'Demasiado corta (mínimo 6 caracteres)', color: 'bg-rose-500', textClass: 'text-rose-600' };
+    let score = 2;
+    if (pwd.length >= 8) score++;
+    if (/[0-9\W]/.test(pwd) && /[a-zA-Z]/.test(pwd)) score++;
+    if (score === 2) return { score: 2, text: 'Débil (cumple el mínimo de 6)', color: 'bg-amber-500', textClass: 'text-amber-600' };
+    if (score === 3) return { score: 3, text: 'Buena (8+ caracteres o combinada)', color: 'bg-blue-500', textClass: 'text-blue-600' };
+    return { score: 4, text: 'Muy segura (larga y combinada)', color: 'bg-emerald-500', textClass: 'text-emerald-600' };
+  };
+
+  const strength = getPasswordStrength(newPassword);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,19 +145,16 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
         return;
       }
 
-      if (res.isSupabase) {
-        setSuccessMessage(
-          res.message ||
-            `Se ha enviado un enlace oficial de recuperación a ${cleanEmail}. Revisa tu bandeja de entrada o spam.`
-        );
-      } else {
-        setGeneratedCode(res.code || null);
-        setRecoveryCode(res.code || '');
-        setMode('reset-code');
-        setSuccessMessage(
-          `Cuenta verificada: ${cleanEmail}. Introduce tu código de 6 dígitos y tu nueva contraseña.`
-        );
-      }
+      // Security measure: NEVER display the code on the screen or prefill it.
+      // The user must open their email, copy the 6-digit code, and enter it manually.
+      setRecoveryCode('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setMode('reset-code');
+      setSuccessMessage(
+        res.message ||
+          `Hemos enviado un código de verificación de 6 dígitos a "${cleanEmail}". Por favor, abre tu correo, copia el código y pégalo a continuación.`
+      );
     } catch (err: any) {
       setErrorMessage(err.message || 'Error al solicitar la recuperación.');
     } finally {
@@ -153,18 +170,18 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
     const cleanEmail = email.trim();
     const cleanCode = recoveryCode.trim();
 
-    if (!cleanCode || cleanCode.length < 4) {
-      setErrorMessage('Por favor, ingresa el código de verificación de 6 dígitos.');
+    if (!cleanCode || cleanCode.length < 6) {
+      setErrorMessage('Por favor, introduce el código de verificación completo de 6 dígitos que has recibido en tu correo.');
       return;
     }
 
     if (!newPassword || newPassword.length < 6) {
-      setErrorMessage('La nueva contraseña debe tener al menos 6 caracteres.');
+      setErrorMessage('La contraseña no es válida: debe tener al menos 6 caracteres para ser admitida.');
       return;
     }
 
     if (newPassword !== confirmNewPassword) {
-      setErrorMessage('Las dos contraseñas no coinciden.');
+      setErrorMessage('Las contraseñas no coinciden. Asegúrate de escribirlas exactamente iguales.');
       return;
     }
 
@@ -172,7 +189,7 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
     try {
       const res = await resetPasswordWithCode(cleanEmail, cleanCode, newPassword);
       if (!res.success) {
-        setErrorMessage(res.error || 'No se pudo restablecer la contraseña.');
+        setErrorMessage(res.error || 'No se pudo restablecer la contraseña. Verifica el código de tu correo.');
         return;
       }
 
@@ -180,21 +197,12 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
       setSuccessMessage('¡Tu contraseña ha sido restablecida con éxito! Ya puedes entrar con tu nueva clave.');
       setMode('login');
       setRecoveryCode('');
-      setGeneratedCode(null);
       setNewPassword('');
       setConfirmNewPassword('');
     } catch (err: any) {
       setErrorMessage(err.message || 'Error al restablecer la contraseña.');
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleCopyCode = () => {
-    if (generatedCode) {
-      navigator.clipboard.writeText(generatedCode);
-      setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 2000);
     }
   };
 
@@ -311,13 +319,13 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
               </div>
             )}
 
-            {/* MODE: FORGOT (Solicitar código o enlace) */}
+            {/* MODE: FORGOT (Solicitar código al correo) */}
             {mode === 'forgot' && (
               <form onSubmit={handleRequestRecovery} className="p-6 space-y-4">
                 <div className="space-y-1">
                   <h3 className="text-sm font-bold text-neutral-900">Restablecer tu Contraseña</h3>
                   <p className="text-xs text-neutral-600 leading-relaxed">
-                    Ingresa el correo electrónico con el que estás registrado. Te enviaremos un enlace oficial o generaremos un código de verificación de 6 dígitos.
+                    Ingresa el correo electrónico con el que estás dado de alta. Si tu cuenta existe en el sistema, enviaremos un código de verificación de 6 dígitos a tu bandeja de entrada para que puedas restablecerla con total seguridad.
                   </p>
                 </div>
 
@@ -345,11 +353,11 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
                   className="w-full py-3 px-4 bg-neutral-900 hover:bg-neutral-800 active:scale-[0.99] text-white rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md shadow-neutral-900/10 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? (
-                    <span>Verificando...</span>
+                    <span>Verificando y enviando...</span>
                   ) : (
                     <>
-                      <KeyRound className="w-4 h-4" />
-                      <span>Solicitar Enlace / Código de Recuperación</span>
+                      <Mail className="w-4 h-4" />
+                      <span>Enviar Código al Correo Electrónico</span>
                     </>
                   )}
                 </button>
@@ -372,33 +380,20 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
             {/* MODE: RESET-CODE (Introducir código y nueva clave) */}
             {mode === 'reset-code' && (
               <form onSubmit={handleResetPasswordSubmit} className="p-6 space-y-4">
-                {generatedCode && (
-                  <div className="p-3.5 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-900 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800">
-                        Código generado de 6 dígitos:
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleCopyCode}
-                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 hover:text-amber-950 bg-white/90 hover:bg-white px-2 py-0.5 rounded-md border border-amber-300 shadow-2xs cursor-pointer"
-                      >
-                        {copiedCode ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                        <span>{copiedCode ? '¡Copiado!' : 'Copiar'}</span>
-                      </button>
-                    </div>
-                    <div className="text-center py-1.5 font-mono text-2xl font-black tracking-widest text-neutral-900 bg-white rounded-lg border border-amber-200 shadow-2xs">
-                      {generatedCode}
-                    </div>
-                    <p className="text-[10px] text-amber-700 leading-tight text-center">
-                      Introduce este código abajo junto con tu nueva clave.
-                    </p>
+                {/* Security info card: instructions to check email */}
+                <div className="p-3.5 rounded-xl bg-indigo-50/90 border border-indigo-200/90 text-indigo-950 space-y-1.5 animate-fade-in">
+                  <div className="flex items-center gap-2 font-semibold text-xs text-indigo-900">
+                    <Mail className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>Código enviado por correo electrónico</span>
                   </div>
-                )}
+                  <p className="text-[11px] text-indigo-900/90 leading-relaxed">
+                    Hemos enviado el código de verificación a <strong className="font-semibold text-indigo-950">{email}</strong>. Por favor, abre tu bandeja de entrada o carpeta de spam, copia el código de 6 dígitos y pégalo a continuación.
+                  </p>
+                </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-neutral-700 mb-1.5">
-                    Correo electrónico
+                    Correo electrónico de tu cuenta
                   </label>
                   <div className="relative">
                     <Mail className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -414,24 +409,42 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-neutral-700 mb-1.5">
-                    Código de verificación (6 dígitos)
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-neutral-700">
+                      Código de verificación (6 dígitos del correo)
+                    </label>
+                    <span className="text-[10px] text-neutral-400 font-mono">
+                      {recoveryCode.length}/6 dígitos
+                    </span>
+                  </div>
                   <input
                     type="text"
                     required
                     maxLength={6}
                     value={recoveryCode}
                     onChange={(e) => setRecoveryCode(e.target.value.replace(/\D/g, ''))}
-                    placeholder="123456"
-                    className="w-full text-center tracking-widest font-mono text-base py-2.5 bg-neutral-50/70 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all font-bold"
+                    placeholder="Ej. 123456"
+                    className="w-full text-center tracking-widest font-mono text-lg py-2.5 bg-neutral-50/70 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all font-bold placeholder:font-normal placeholder:tracking-normal placeholder:text-neutral-400"
                   />
+                  {recoveryCode.length > 0 && recoveryCode.length < 6 && (
+                    <p className="text-[10.5px] text-amber-600 flex items-center gap-1 mt-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      Introduce los 6 dígitos completos recibidos en tu correo.
+                    </p>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-neutral-700 mb-1.5">
-                    Nueva contraseña (mínimo 6 caracteres)
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-neutral-700">
+                      Nueva contraseña
+                    </label>
+                    {newPassword && (
+                      <span className={`text-[11px] font-semibold ${strength.textClass}`}>
+                        {strength.text}
+                      </span>
+                    )}
+                  </div>
                   <div className="relative">
                     <Lock className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
@@ -439,8 +452,12 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
                       required
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full pl-10 pr-10 py-2.5 text-xs sm:text-sm bg-neutral-50/70 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all"
+                      placeholder="Mínimo 6 caracteres"
+                      className={`w-full pl-10 pr-10 py-2.5 text-xs sm:text-sm bg-neutral-50/70 border rounded-xl focus:outline-none focus:ring-2 transition-all ${
+                        passwordLen > 0 && !isMinLength
+                          ? 'border-rose-300 focus:ring-rose-500/20 focus:border-rose-500'
+                          : 'border-neutral-300 focus:ring-indigo-500/20 focus:border-indigo-600'
+                      }`}
                     />
                     <button
                       type="button"
@@ -450,6 +467,48 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+
+                  {/* Password Strength Visual Meter */}
+                  {newPassword && (
+                    <div className="mt-2 space-y-1.5">
+                      <div className="grid grid-cols-4 gap-1 h-1.5 w-full">
+                        <div className={`rounded-full transition-all ${strength.score >= 1 ? strength.color : 'bg-neutral-200'}`} />
+                        <div className={`rounded-full transition-all ${strength.score >= 2 ? strength.color : 'bg-neutral-200'}`} />
+                        <div className={`rounded-full transition-all ${strength.score >= 3 ? strength.color : 'bg-neutral-200'}`} />
+                        <div className={`rounded-full transition-all ${strength.score >= 4 ? strength.color : 'bg-neutral-200'}`} />
+                      </div>
+
+                      {/* Requirement checklist */}
+                      <div className="grid grid-cols-2 gap-1 pt-1 text-[10.5px]">
+                        <div className={`flex items-center gap-1 ${isMinLength ? 'text-emerald-600 font-medium' : 'text-neutral-500'}`}>
+                          {isMinLength ? <Check className="w-3 h-3 text-emerald-600" /> : <span className="w-1.5 h-1.5 rounded-full bg-neutral-300 ml-1 mr-0.5" />}
+                          <span>Mínimo 6 caracteres</span>
+                        </div>
+                        <div className={`flex items-center gap-1 ${isGoodLength ? 'text-emerald-600 font-medium' : 'text-neutral-500'}`}>
+                          {isGoodLength ? <Check className="w-3 h-3 text-emerald-600" /> : <span className="w-1.5 h-1.5 rounded-full bg-neutral-300 ml-1 mr-0.5" />}
+                          <span>Recomendado 8+</span>
+                        </div>
+                        <div className={`flex items-center gap-1 ${hasNumbersOrSymbols ? 'text-emerald-600 font-medium' : 'text-neutral-500'}`}>
+                          {hasNumbersOrSymbols ? <Check className="w-3 h-3 text-emerald-600" /> : <span className="w-1.5 h-1.5 rounded-full bg-neutral-300 ml-1 mr-0.5" />}
+                          <span>Números o símbolos</span>
+                        </div>
+                        <div className={`flex items-center gap-1 ${hasLetters ? 'text-emerald-600 font-medium' : 'text-neutral-500'}`}>
+                          {hasLetters ? <Check className="w-3 h-3 text-emerald-600" /> : <span className="w-1.5 h-1.5 rounded-full bg-neutral-300 ml-1 mr-0.5" />}
+                          <span>Contiene letras</span>
+                        </div>
+                      </div>
+
+                      {/* Explicit Warning for short password */}
+                      {passwordLen > 0 && !isMinLength && (
+                        <div className="p-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[11px] flex items-start gap-1.5 mt-1 animate-fade-in">
+                          <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                          <span>
+                            <strong>Clave demasiado corta:</strong> El sistema exige un mínimo de 6 caracteres (actualmente tiene {passwordLen}). Añade más caracteres para poder guardarla.
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -463,19 +522,47 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
                       required
                       value={confirmNewPassword}
                       onChange={(e) => setConfirmNewPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full pl-10 pr-3 py-2.5 text-xs sm:text-sm bg-neutral-50/70 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all"
+                      placeholder="Repite la nueva contraseña"
+                      className={`w-full pl-10 pr-3 py-2.5 text-xs sm:text-sm bg-neutral-50/70 border rounded-xl focus:outline-none focus:ring-2 transition-all ${
+                        passwordsMismatch
+                          ? 'border-rose-300 focus:ring-rose-500/20 focus:border-rose-500'
+                          : passwordsMatch
+                          ? 'border-emerald-400 focus:ring-emerald-500/20 focus:border-emerald-600'
+                          : 'border-neutral-300 focus:ring-indigo-500/20 focus:border-indigo-600'
+                      }`}
                     />
                   </div>
+
+                  {confirmNewPassword && (
+                    <div className="mt-1 flex items-center gap-1 text-[11px] font-medium">
+                      {passwordsMatch ? (
+                        <span className="text-emerald-600 flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" /> Las contraseñas coinciden
+                        </span>
+                      ) : (
+                        <span className="text-rose-600 flex items-center gap-1">
+                          <AlertCircle className="w-3.5 h-3.5" /> Las contraseñas no coinciden aún
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
+
+                {/* Inline Error Notice directly above the submit button */}
+                {errorMessage && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2 text-xs text-rose-800 animate-fade-in">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <span>{errorMessage}</span>
+                  </div>
+                )}
 
                 <button
                   type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-3 px-4 bg-neutral-900 hover:bg-neutral-800 active:scale-[0.99] text-white rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md shadow-neutral-900/10 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
+                  disabled={isSubmitting || (newPassword.length > 0 && !isMinLength)}
+                  className="w-full py-3 px-4 bg-neutral-900 hover:bg-neutral-800 active:scale-[0.99] text-white rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md shadow-neutral-900/10 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? (
-                    <span>Restableciendo...</span>
+                    <span>Guardando y verificando...</span>
                   ) : (
                     <>
                       <KeyRound className="w-4 h-4" />
@@ -483,6 +570,12 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
                     </>
                   )}
                 </button>
+
+                {newPassword.length > 0 && !isMinLength && (
+                  <p className="text-[10.5px] text-center text-rose-600 font-medium -mt-2">
+                    ⚠️ El botón se habilitará al completar el mínimo de 6 caracteres.
+                  </p>
+                )}
 
                 <div className="text-center pt-1">
                   <button
@@ -493,7 +586,7 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
                     }}
                     className="text-xs text-neutral-500 hover:text-neutral-800 cursor-pointer"
                   >
-                    ¿No te llegó el código? Solicitar uno nuevo
+                    ¿No te llegó el correo con el código? Solicitar reenvío
                   </button>
                 </div>
               </form>
@@ -615,6 +708,23 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
                     </>
                   )}
                 </button>
+
+                {mode === 'login' && (
+                  <div className="text-center pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode('forgot');
+                        setErrorMessage(null);
+                        setSuccessMessage(null);
+                      }}
+                      className="text-xs text-neutral-500 hover:text-indigo-600 font-medium hover:underline inline-flex items-center gap-1.5 cursor-pointer transition-colors py-1"
+                    >
+                      <KeyRound className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>¿No recuerdas tu contraseña? Restablécela aquí</span>
+                    </button>
+                  </div>
+                )}
               </form>
             )}
 

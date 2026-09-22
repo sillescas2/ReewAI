@@ -463,19 +463,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const supabase = getSupabaseClient();
       if (supabase) {
         try {
-          const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-            redirectTo: typeof window !== 'undefined' ? `${window.location.origin}` : undefined,
-          });
-          if (error) {
-            return { success: false, error: error.message };
+          const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
+
+          if (!error) {
+            return {
+              success: true,
+              isSupabase: true,
+              message: `Se ha enviado el correo con el código de verificación oficial a "${cleanEmail}". Por favor, abre tu bandeja de entrada o spam, copia el código de 6 dígitos y pégalo aquí.`,
+            };
           }
-          return {
-            success: true,
-            isSupabase: true,
-            message: `Se ha enviado un enlace de recuperación oficial de Supabase a ${cleanEmail}. Revisa tu bandeja de entrada o spam.`,
-          };
+
+          const msg = (error.message || '').toLowerCase();
+          if (msg.includes('user not found') || msg.includes('not found') || msg.includes('invalid user')) {
+            return {
+              success: false,
+              error: `No existe ningún usuario registrado con el correo "${cleanEmail}". Por favor verifica la dirección o date de alta.`,
+            };
+          }
+
+          console.warn('Supabase resetPasswordForEmail notice:', error.message);
         } catch (err: any) {
-          return { success: false, error: err.message || 'Error al solicitar restablecimiento en Supabase.' };
+          console.warn('Supabase reset exception, proceeding to verification code:', err);
         }
       }
     }
@@ -483,33 +491,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Built-in / Local / Central Database mode:
     const serverRes = await DatabaseService.requestPasswordReset(cleanEmail);
 
-    if (serverRes.success && serverRes.code) {
+    if (serverRes.success) {
       const expiresAt = serverRes.expiresAt || (Date.now() + 15 * 60 * 1000);
-      try {
-        sessionStorage.setItem(
-          `reewai_pwd_reset_${cleanEmail}`,
-          JSON.stringify({ code: serverRes.code, expiresAt })
-        );
-      } catch (e) {}
+      if (serverRes.code) {
+        try {
+          sessionStorage.setItem(
+            `reewai_pwd_reset_${cleanEmail}`,
+            JSON.stringify({ code: serverRes.code, expiresAt })
+          );
+        } catch (e) {}
+      }
 
       return {
         success: true,
         isSupabase: false,
-        code: serverRes.code,
         expiresAt,
-        message: 'Código de recuperación generado con éxito.',
+        message: `Hemos enviado el código de verificación a "${cleanEmail}". Revisa tu correo, copia el código de 6 dígitos y pégalo a continuación.`,
       };
     }
 
-    // If server says user not found and we also do not have it locally
+    // If neither server nor local storage has this user
     if (!existingUser && !serverRes.success) {
       return {
         success: false,
-        error: `No existe ninguna cuenta registrada con el correo "${cleanEmail}". Verifica la dirección o crea una cuenta nueva.`,
+        error: `No existe ninguna cuenta registrada con el correo "${cleanEmail}". Verifica que esté bien escrito o date de alta.`,
       };
     }
 
-    // Fallback if server offline or standalone preview
+    // Standalone fallback: save in session storage for verification, but DO NOT show code on screen
     const fallbackCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 15 * 60 * 1000;
     try {
@@ -522,9 +531,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return {
       success: true,
       isSupabase: false,
-      code: fallbackCode,
       expiresAt,
-      message: 'Código de recuperación de 6 dígitos generado para tu cuenta.',
+      message: `Código de verificación enviado para tu cuenta "${cleanEmail}". Revisa tu correo y escribe los 6 dígitos.`,
     };
   };
 
@@ -542,7 +550,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (cleanPassword.length < 6) {
-      return { success: false, error: 'La nueva contraseña debe contener al menos 6 caracteres.' };
+      return {
+        success: false,
+        error: 'La nueva contraseña debe contener al menos 6 caracteres para ser aceptada.',
+      };
     }
 
     // Verify code from session storage if present
@@ -562,27 +573,63 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           error: 'El código de recuperación ha expirado. Por favor solicita uno nuevo.',
         };
       }
-      if (cachedData.code !== cleanCode) {
+      if (cachedData.code !== cleanCode && !isSupabase) {
         return {
           success: false,
-          error: 'El código de recuperación es incorrecto. Verifica los 6 dígitos introducidos.',
+          error: 'El código de recuperación es incorrecto. Verifica los 6 dígitos introducidos desde tu correo.',
         };
       }
     }
 
-    // Call server to reset in central DB
-    await DatabaseService.resetPassword(cleanEmail, cleanCode, cleanPassword);
-
-    // Also update Supabase if configured
+    // If Supabase is configured, verify OTP and update user password
     if (isSupabase) {
       const supabase = getSupabaseClient();
       if (supabase) {
         try {
-          await supabase.auth.updateUser({ password: cleanPassword });
-        } catch (e) {
+          // Attempt OTP verification to authenticate recovery session
+          const { error: otpError } = await supabase.auth.verifyOtp({
+            email: cleanEmail,
+            token: cleanCode,
+            type: 'recovery',
+          });
+
+          if (otpError) {
+            console.warn('Supabase verifyOtp notice:', otpError.message);
+            // If cachedData didn't match either, return error
+            if (!cachedData || cachedData.code !== cleanCode) {
+              const friendlyOtpMsg = otpError.message.toLowerCase().includes('expired')
+                ? 'El código de verificación ha expirado. Por favor solicita uno nuevo.'
+                : 'El código de verificación es incorrecto o no coincide. Verifica los 6 dígitos recibidos en tu correo.';
+              return { success: false, error: friendlyOtpMsg };
+            }
+          }
+
+          // Update password in Supabase
+          const { error: updateError } = await supabase.auth.updateUser({ password: cleanPassword });
+          if (updateError) {
+            let userFriendlyMsg = updateError.message;
+            const lowerMsg = userFriendlyMsg.toLowerCase();
+            if (lowerMsg.includes('weak') || lowerMsg.includes('least 6') || lowerMsg.includes('pwned') || lowerMsg.includes('security')) {
+              userFriendlyMsg = 'La contraseña no es suficientemente segura según las políticas de Supabase: debe tener al menos 6 caracteres y combinar números o letras.';
+            }
+            return {
+              success: false,
+              error: `Problema con la clave: ${userFriendlyMsg}`,
+            };
+          }
+        } catch (e: any) {
           console.warn('Notice updating password in Supabase:', e);
         }
       }
+    }
+
+    // Call server to reset in central DB
+    const dbRes = await DatabaseService.resetPassword(cleanEmail, cleanCode, cleanPassword);
+    if (!dbRes.success && !isSupabase && (!cachedData || cachedData.code !== cleanCode)) {
+      return {
+        success: false,
+        error: dbRes.error || 'No se pudo restablecer la contraseña en el servidor.',
+      };
     }
 
     // Update local availableUsers

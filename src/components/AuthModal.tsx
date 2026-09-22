@@ -54,14 +54,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Password recovery states
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
-  const [generatedCode, setGeneratedCode] = useState<string | null>(null);
-  const [codeExpiresAt, setCodeExpiresAt] = useState<number | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [copiedCode, setCopiedCode] = useState(false);
+
+  // Password strength and validation helpers
+  const modalPwdLen = newPassword.length;
+  const isModalMinLength = modalPwdLen >= 6;
+  const isModalGoodLength = modalPwdLen >= 8;
+  const hasModalSpecial = /[0-9\W]/.test(newPassword);
+  const hasModalLetters = /[a-zA-Z]/.test(newPassword);
+  const modalPasswordsMatch = newPassword.length > 0 && confirmNewPassword.length > 0 && newPassword === confirmNewPassword;
+  const modalPasswordsMismatch = newPassword.length > 0 && confirmNewPassword.length > 0 && newPassword !== confirmNewPassword;
+
+  const getModalPasswordStrength = (pwd: string) => {
+    if (!pwd) return { score: 0, text: 'Introduce una clave', color: 'bg-neutral-200', textClass: 'text-neutral-400' };
+    if (pwd.length < 6) return { score: 1, text: 'Demasiado corta (mínimo 6 caracteres)', color: 'bg-rose-500', textClass: 'text-rose-600' };
+    let score = 2;
+    if (pwd.length >= 8) score++;
+    if (/[0-9\W]/.test(pwd) && /[a-zA-Z]/.test(pwd)) score++;
+    if (score === 2) return { score: 2, text: 'Débil (mínimo alcanzado)', color: 'bg-amber-500', textClass: 'text-amber-600' };
+    if (score === 3) return { score: 3, text: 'Buena (8+ o combinada)', color: 'bg-blue-500', textClass: 'text-blue-600' };
+    return { score: 4, text: 'Muy segura', color: 'bg-emerald-500', textClass: 'text-emerald-600' };
+  };
+
+  const modalStrength = getModalPasswordStrength(newPassword);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -166,21 +185,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         return;
       }
 
-      if (res.isSupabase) {
-        setSuccessMessage(
-          res.message ||
-            `Se ha enviado un enlace de recuperación oficial a ${targetEmail}. Revisa tu bandeja de entrada o spam.`
-        );
-      } else {
-        // Built-in / Central DB mode
-        setGeneratedCode(res.code || null);
-        setRecoveryCode(res.code || '');
-        setCodeExpiresAt(res.expiresAt || null);
-        setTab('reset-code');
-        setSuccessMessage(
-          `Usuario verificado: ${targetEmail}. Se ha generado un código de recuperación de 6 dígitos.`
-        );
-      }
+      setRecoveryCode('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setTab('reset-code');
+      setSuccessMessage(
+        res.message ||
+          `Hemos enviado un código de verificación a "${targetEmail}". Abre tu correo, copia el código de 6 dígitos y pégalo aquí.`
+      );
     } catch (err: any) {
       setError(err.message || 'Error al solicitar el código de recuperación.');
     } finally {
@@ -197,8 +209,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const targetEmail = (recoveryEmail || email).trim();
     const code = recoveryCode.trim();
 
-    if (!code || code.length < 4) {
-      setError('Por favor, ingresa el código de verificación de 6 dígitos.');
+    if (!code || code.length < 6) {
+      setError('Por favor, ingresa el código de verificación completo de 6 dígitos recibido en tu correo.');
       return;
     }
 
@@ -216,7 +228,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       const res = await resetPasswordWithCode(targetEmail, code, newPassword);
       if (!res.success) {
-        setError(res.error || 'No se pudo restablecer la contraseña.');
+        setError(res.error || 'No se pudo restablecer la contraseña. Verifica el código recibido.');
         return;
       }
 
@@ -233,14 +245,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setError(err.message || 'Error al restablecer la contraseña.');
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleCopyCode = () => {
-    if (generatedCode) {
-      navigator.clipboard.writeText(generatedCode);
-      setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 2000);
     }
   };
 
@@ -525,10 +529,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="p-3.5 bg-amber-50/80 border border-amber-200/80 rounded-xl text-xs text-amber-900 space-y-1">
                 <p className="font-semibold flex items-center gap-1.5">
                   <KeyRound className="w-4 h-4 text-amber-600 shrink-0" />
-                  Recuperación para usuarios registrados
+                  Recuperación por correo para usuarios registrados
                 </p>
                 <p className="text-[11px] text-amber-800 leading-relaxed">
-                  Introduce el correo electrónico con el que estás dado de alta en la plataforma. Comprobaremos tus datos y emitiremos un código de recuperación seguro para que puedas crear una nueva contraseña.
+                  Introduce el correo electrónico con el que estás dado de alta en la plataforma. Si tu cuenta está registrada, enviaremos un código de verificación de 6 dígitos a tu bandeja de entrada para que puedas restablecer tu contraseña con total seguridad.
                 </p>
               </div>
 
@@ -588,63 +592,55 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {/* ================= VIEW 4: RESET PASSWORD WITH CODE ================= */}
           {tab === 'reset-code' && (
             <div className="space-y-4">
-              {/* Generated Code Display Box */}
-              {generatedCode && (
-                <div className="p-3.5 bg-indigo-50/90 border border-indigo-200 rounded-xl text-xs space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-indigo-950 flex items-center gap-1.5 text-xs">
-                      <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                      Código de verificación generado:
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleCopyCode}
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 bg-white px-2 py-1 rounded-md border border-indigo-200 shadow-2xs transition-colors cursor-pointer"
-                    >
-                      {copiedCode ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-600" />
-                          <span>¡Copiado!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3" />
-                          <span>Copiar código</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-center py-2 bg-white rounded-lg border border-indigo-200/80">
-                    <span className="font-mono text-xl font-extrabold tracking-widest text-indigo-700">
-                      {generatedCode}
-                    </span>
-                  </div>
-                  <p className="text-[10.5px] text-indigo-900/80 leading-relaxed">
-                    Código de 6 dígitos válido durante 15 minutos. En un servidor con servicio de correo SMTP configurado, este código se remitiría a tu bandeja de entrada; en esta aplicación se te facilita aquí para verificar tu identidad y restablecer tu clave.
-                  </p>
+              {/* Security info card: instructions to check email */}
+              <div className="p-3.5 bg-indigo-50/90 border border-indigo-200/90 rounded-xl text-xs space-y-1.5 animate-fade-in">
+                <div className="flex items-center gap-2 font-semibold text-xs text-indigo-950">
+                  <Mail className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>Código enviado a tu correo electrónico</span>
                 </div>
-              )}
+                <p className="text-[11px] text-indigo-900/90 leading-relaxed">
+                  Hemos enviado un código de verificación a <strong className="font-semibold text-indigo-950">{recoveryEmail || email}</strong>. Abre tu correo, copia los 6 dígitos y pégalos a continuación junto con tu nueva clave.
+                </p>
+              </div>
 
               <form onSubmit={handleResetPasswordSubmit} className="space-y-3">
                 <div>
-                  <label className="block text-xs font-medium text-neutral-700 mb-1">
-                    Código de Verificación (6 dígitos)
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-medium text-neutral-700">
+                      Código de Verificación (6 dígitos)
+                    </label>
+                    <span className="text-[10px] text-neutral-400 font-mono">
+                      {recoveryCode.length}/6 dígitos
+                    </span>
+                  </div>
                   <input
                     type="text"
                     required
                     maxLength={6}
                     value={recoveryCode}
-                    onChange={(e) => setRecoveryCode(e.target.value.trim())}
+                    onChange={(e) => setRecoveryCode(e.target.value.replace(/\D/g, ''))}
                     placeholder="Ej. 123456"
-                    className="w-full px-3 py-2 font-mono text-center tracking-widest text-sm font-semibold border border-neutral-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden"
+                    className="w-full px-3 py-2 font-mono text-center tracking-widest text-base font-bold border border-neutral-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden"
                   />
+                  {recoveryCode.length > 0 && recoveryCode.length < 6 && (
+                    <p className="text-[10px] text-amber-600 flex items-center gap-1 mt-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      Introduce los 6 dígitos recibidos en tu correo.
+                    </p>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-neutral-700 mb-1">
-                    Nueva Contraseña
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-medium text-neutral-700">
+                      Nueva Contraseña
+                    </label>
+                    {newPassword && (
+                      <span className={`text-[10.5px] font-semibold ${modalStrength.textClass}`}>
+                        {modalStrength.text}
+                      </span>
+                    )}
+                  </div>
                   <div className="relative">
                     <Lock className="w-4 h-4 absolute left-3 top-2.5 text-neutral-400" />
                     <input
@@ -653,7 +649,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="Mínimo 6 caracteres"
-                      className="w-full pl-9 pr-10 py-2 text-xs border border-neutral-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden"
+                      className={`w-full pl-9 pr-10 py-2 text-xs border rounded-xl focus:ring-2 outline-hidden ${
+                        modalPwdLen > 0 && !isModalMinLength
+                          ? 'border-rose-300 focus:ring-rose-500 focus:border-rose-500'
+                          : 'border-neutral-300 focus:ring-indigo-500 focus:border-indigo-500'
+                      }`}
                     />
                     <button
                       type="button"
@@ -664,6 +664,44 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+
+                  {/* Password Strength Visual Meter */}
+                  {newPassword && (
+                    <div className="mt-1.5 space-y-1">
+                      <div className="grid grid-cols-4 gap-1 h-1 w-full">
+                        <div className={`rounded-full ${modalStrength.score >= 1 ? modalStrength.color : 'bg-neutral-200'}`} />
+                        <div className={`rounded-full ${modalStrength.score >= 2 ? modalStrength.color : 'bg-neutral-200'}`} />
+                        <div className={`rounded-full ${modalStrength.score >= 3 ? modalStrength.color : 'bg-neutral-200'}`} />
+                        <div className={`rounded-full ${modalStrength.score >= 4 ? modalStrength.color : 'bg-neutral-200'}`} />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1 text-[10px] pt-0.5">
+                        <div className={`flex items-center gap-1 ${isModalMinLength ? 'text-emerald-600 font-medium' : 'text-neutral-500'}`}>
+                          {isModalMinLength ? <Check className="w-2.5 h-2.5 text-emerald-600" /> : <span className="w-1 h-1 rounded-full bg-neutral-300 ml-1 mr-0.5" />}
+                          <span>Mínimo 6 caract.</span>
+                        </div>
+                        <div className={`flex items-center gap-1 ${isModalGoodLength ? 'text-emerald-600 font-medium' : 'text-neutral-500'}`}>
+                          {isModalGoodLength ? <Check className="w-2.5 h-2.5 text-emerald-600" /> : <span className="w-1 h-1 rounded-full bg-neutral-300 ml-1 mr-0.5" />}
+                          <span>Recomendado 8+</span>
+                        </div>
+                        <div className={`flex items-center gap-1 ${hasModalSpecial ? 'text-emerald-600 font-medium' : 'text-neutral-500'}`}>
+                          {hasModalSpecial ? <Check className="w-2.5 h-2.5 text-emerald-600" /> : <span className="w-1 h-1 rounded-full bg-neutral-300 ml-1 mr-0.5" />}
+                          <span>Núm./símbolos</span>
+                        </div>
+                        <div className={`flex items-center gap-1 ${hasModalLetters ? 'text-emerald-600 font-medium' : 'text-neutral-500'}`}>
+                          {hasModalLetters ? <Check className="w-2.5 h-2.5 text-emerald-600" /> : <span className="w-1 h-1 rounded-full bg-neutral-300 ml-1 mr-0.5" />}
+                          <span>Contiene letras</span>
+                        </div>
+                      </div>
+
+                      {modalPwdLen > 0 && !isModalMinLength && (
+                        <p className="text-[10px] text-rose-600 flex items-center gap-1 mt-0.5">
+                          <AlertCircle className="w-3 h-3 shrink-0" />
+                          La contraseña debe tener al menos 6 caracteres (llevas {modalPwdLen}).
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -678,7 +716,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       value={confirmNewPassword}
                       onChange={(e) => setConfirmNewPassword(e.target.value)}
                       placeholder="Repite la nueva contraseña"
-                      className="w-full pl-9 pr-10 py-2 text-xs border border-neutral-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden"
+                      className={`w-full pl-9 pr-10 py-2 text-xs border rounded-xl focus:ring-2 outline-hidden ${
+                        modalPasswordsMismatch
+                          ? 'border-rose-300 focus:ring-rose-500 focus:border-rose-500'
+                          : modalPasswordsMatch
+                          ? 'border-emerald-400 focus:ring-emerald-500 focus:border-emerald-500'
+                          : 'border-neutral-300 focus:ring-indigo-500 focus:border-indigo-500'
+                      }`}
                     />
                     <button
                       type="button"
@@ -689,20 +733,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  {newPassword && confirmNewPassword && (
+                  {confirmNewPassword && (
                     <div className="mt-1 flex items-center gap-1 text-[10px]">
-                      {newPassword === confirmNewPassword ? (
+                      {modalPasswordsMatch ? (
                         <span className="text-emerald-600 flex items-center gap-1 font-medium">
                           <Check className="w-3 h-3" /> Las contraseñas coinciden
                         </span>
                       ) : (
                         <span className="text-rose-500 flex items-center gap-1 font-medium">
-                          <AlertCircle className="w-3 h-3" /> Las contraseñas no coinciden
+                          <AlertCircle className="w-3 h-3" /> Las contraseñas no coinciden aún
                         </span>
                       )}
                     </div>
                   )}
                 </div>
+
+                {/* Inline Error Notice */}
+                {error && (
+                  <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-1.5 text-xs text-rose-800">
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
 
                 <div className="flex gap-2 pt-2">
                   <button
@@ -717,7 +769,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </button>
                   <button
                     type="submit"
-                    disabled={isSubmitting || !newPassword || newPassword !== confirmNewPassword}
+                    disabled={isSubmitting || (newPassword.length > 0 && !isModalMinLength) || modalPasswordsMismatch}
                     className="flex-2 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white text-xs font-semibold rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                   >
                     {isSubmitting ? (
