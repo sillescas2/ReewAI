@@ -319,13 +319,13 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
               </div>
             )}
 
-            {/* MODE: FORGOT (Solicitar código al correo) */}
+            {/* MODE: FORGOT (Solicitar código o enlace al correo) */}
             {mode === 'forgot' && (
               <form onSubmit={handleRequestRecovery} className="p-6 space-y-4">
                 <div className="space-y-1">
                   <h3 className="text-sm font-bold text-neutral-900">Restablecer tu Contraseña</h3>
                   <p className="text-xs text-neutral-600 leading-relaxed">
-                    Ingresa el correo electrónico con el que estás dado de alta. Si tu cuenta existe en el sistema, enviaremos un código de verificación de 6 dígitos a tu bandeja de entrada para que puedas restablecerla con total seguridad.
+                    Ingresa el correo de tu cuenta. Si estás registrado, recibirás un correo seguro de recuperación para restablecer tu clave mediante enlace directo o código de verificación.
                   </p>
                 </div>
 
@@ -357,7 +357,7 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
                   ) : (
                     <>
                       <Mail className="w-4 h-4" />
-                      <span>Enviar Código al Correo Electrónico</span>
+                      <span>Enviar Correo de Recuperación</span>
                     </>
                   )}
                 </button>
@@ -371,7 +371,7 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
                     }}
                     className="text-xs text-indigo-600 hover:text-indigo-800 font-medium hover:underline cursor-pointer"
                   >
-                    ¿Ya tienes un código de 6 dígitos? Haz clic aquí →
+                    ¿Ya tienes un código o quieres introducirlo? Haz clic aquí →
                   </button>
                 </div>
               </form>
@@ -381,14 +381,19 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
             {mode === 'reset-code' && (
               <form onSubmit={handleResetPasswordSubmit} className="p-6 space-y-4">
                 {/* Security info card: instructions to check email */}
-                <div className="p-3.5 rounded-xl bg-indigo-50/90 border border-indigo-200/90 text-indigo-950 space-y-1.5 animate-fade-in">
+                <div className="p-3.5 rounded-xl bg-indigo-50/90 border border-indigo-200/90 text-indigo-950 space-y-2 animate-fade-in">
                   <div className="flex items-center gap-2 font-semibold text-xs text-indigo-900">
                     <Mail className="w-4 h-4 text-indigo-600 shrink-0" />
-                    <span>Código enviado por correo electrónico</span>
+                    <span>Correo de recuperación enviado a {email || 'tu dirección'}</span>
                   </div>
-                  <p className="text-[11px] text-indigo-900/90 leading-relaxed">
-                    Hemos enviado el código de verificación a <strong className="font-semibold text-indigo-950">{email}</strong>. Por favor, abre tu bandeja de entrada o carpeta de spam, copia el código de 6 dígitos y pégalo a continuación.
-                  </p>
+                  <div className="text-[11px] text-indigo-900/90 space-y-1.5 leading-relaxed">
+                    <p>
+                      🔗 <strong>Si recibes un enlace/botón ("Restablecer contraseña"):</strong> Haz clic directamente en él desde tu correo. La aplicación se abrirá automáticamente con el formulario para guardar tu nueva clave sin necesidad de código numérico.
+                    </p>
+                    <p>
+                      🔢 <strong>Si tu correo contiene un código de 6 dígitos:</strong> Puedes escribirlo en la casilla de abajo junto a tu nueva contraseña.
+                    </p>
+                  </div>
                 </div>
 
                 <div>

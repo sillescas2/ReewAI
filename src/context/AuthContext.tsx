@@ -82,6 +82,16 @@ interface AuthContextType {
     error?: string;
     message?: string;
   }>;
+  recoveryFlow: PasswordRecoveryFlowState;
+  closeRecoveryFlow: () => void;
+  updatePasswordDirectly: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
+}
+
+export interface PasswordRecoveryFlowState {
+  isActive: boolean;
+  type: 'set-new-password' | 'expired-link' | 'none';
+  errorMessage?: string;
+  email?: string;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -91,6 +101,72 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
   const isSupabase = isSupabaseConfigured();
   const [availableUsers, setAvailableUsers] = useState<UserProfile[]>([]);
+
+  // Recovery flow state (handles both valid email link tokens and expired/error hash from Supabase)
+  const [recoveryFlow, setRecoveryFlow] = useState<PasswordRecoveryFlowState>({
+    isActive: false,
+    type: 'none',
+  });
+
+  const closeRecoveryFlow = () => {
+    setRecoveryFlow({ isActive: false, type: 'none' });
+    if (typeof window !== 'undefined' && window.location.hash) {
+      try {
+        const cleanUrl = window.location.pathname + window.location.search;
+        window.history.replaceState(null, '', cleanUrl);
+      } catch (e) {}
+    }
+  };
+
+  // Inspect URL on startup & on hash changes for Supabase recovery callbacks or errors
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const checkUrlForRecovery = () => {
+      const hash = window.location.hash.startsWith('#')
+        ? window.location.hash.substring(1)
+        : window.location.hash;
+      const hashParams = new URLSearchParams(hash);
+      const searchParams = new URLSearchParams(window.location.search);
+
+      const error = hashParams.get('error') || searchParams.get('error');
+      const errorCode = hashParams.get('error_code') || searchParams.get('error_code');
+      const errorDescription = hashParams.get('error_description') || searchParams.get('error_description');
+      const type = hashParams.get('type') || searchParams.get('type');
+      const accessToken = hashParams.get('access_token');
+
+      // Check for errors like otp_expired or access_denied (from Image 2)
+      if (
+        errorCode === 'otp_expired' ||
+        error === 'access_denied' ||
+        (errorDescription && errorDescription.toLowerCase().includes('expired'))
+      ) {
+        setRecoveryFlow({
+          isActive: true,
+          type: 'expired-link',
+          errorMessage: 'El enlace de recuperación ha caducado o ya ha sido utilizado.',
+        });
+        try {
+          const cleanUrl = window.location.pathname + window.location.search;
+          window.history.replaceState(null, '', cleanUrl);
+        } catch (e) {}
+        return;
+      }
+
+      // Check for valid recovery token in URL
+      if (type === 'recovery' || (accessToken && type === 'recovery')) {
+        setRecoveryFlow((prev) => ({
+          ...prev,
+          isActive: true,
+          type: 'set-new-password',
+        }));
+      }
+    };
+
+    checkUrlForRecovery();
+    window.addEventListener('hashchange', checkUrlForRecovery);
+    return () => window.removeEventListener('hashchange', checkUrlForRecovery);
+  }, []);
 
   // Initialize Auth state
   useEffect(() => {
@@ -115,7 +191,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             // Listen to auth changes
-            supabase.auth.onAuthStateChange((_event, session) => {
+            supabase.auth.onAuthStateChange((event, session) => {
+              if (event === 'PASSWORD_RECOVERY') {
+                setRecoveryFlow({
+                  isActive: true,
+                  type: 'set-new-password',
+                  email: session?.user?.email || '',
+                });
+              }
+
               if (session?.user) {
                 const u = session.user;
                 setUser({
@@ -463,13 +547,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const supabase = getSupabaseClient();
       if (supabase) {
         try {
-          const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
+          const redirectUrl = typeof window !== 'undefined'
+            ? `${window.location.origin}${window.location.pathname}`
+            : undefined;
+
+          const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+            redirectTo: redirectUrl,
+          });
 
           if (!error) {
             return {
               success: true,
               isSupabase: true,
-              message: `Se ha enviado el correo con el código de verificación oficial a "${cleanEmail}". Por favor, abre tu bandeja de entrada o spam, copia el código de 6 dígitos y pégalo aquí.`,
+              message: `Hemos enviado el correo oficial de recuperación a "${cleanEmail}". Abre tu correo y pulsa directamente en el enlace "Restablecer contraseña" para elegir tu nueva clave.`,
             };
           }
 
@@ -658,6 +748,63 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       success: true,
       message: '¡Contraseña restablecida correctamente! Ya puedes iniciar sesión con tu nueva clave.',
     };
+  };
+
+  const updatePasswordDirectly = async (
+    newPassword: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cleanPassword = (newPassword || '').trim();
+    if (!cleanPassword || cleanPassword.length < 6) {
+      return { success: false, error: 'La nueva contraseña debe tener al menos 6 caracteres.' };
+    }
+
+    if (isSupabase) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { error } = await supabase.auth.updateUser({ password: cleanPassword });
+          if (error) {
+            let userFriendlyMsg = error.message;
+            const lower = userFriendlyMsg.toLowerCase();
+            if (
+              lower.includes('weak') ||
+              lower.includes('least 6') ||
+              lower.includes('pwned') ||
+              lower.includes('security')
+            ) {
+              userFriendlyMsg =
+                'La contraseña no es suficientemente segura según las políticas de Supabase: debe tener al menos 6 caracteres y combinar números o letras.';
+            }
+            return { success: false, error: userFriendlyMsg };
+          }
+        } catch (err: any) {
+          return {
+            success: false,
+            error: err.message || 'Error al actualizar contraseña en Supabase.',
+          };
+        }
+      }
+    }
+
+    // Also update in local and central DB if target user is known
+    const targetEmail = recoveryFlow.email || user?.email;
+    if (targetEmail) {
+      DatabaseService.resetPassword(targetEmail, '', cleanPassword).catch((e) =>
+        console.warn('DatabaseService password update notice:', e)
+      );
+
+      const updatedList = availableUsers.map((u) =>
+        u.email.toLowerCase() === targetEmail.toLowerCase() ? { ...u, password: cleanPassword } : u
+      );
+      setAvailableUsers(updatedList);
+      localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(updatedList));
+
+      if (user && user.email.toLowerCase() === targetEmail.toLowerCase()) {
+        setUser({ ...user, password: cleanPassword });
+      }
+    }
+
+    return { success: true };
   };
 
   const refreshUsers = async () => {
@@ -1026,6 +1173,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         getLoginLockout: (email?: string) => getLockoutState(email),
         requestPasswordReset,
         resetPasswordWithCode,
+        recoveryFlow,
+        closeRecoveryFlow,
+        updatePasswordDirectly,
       }}
     >
       {children}

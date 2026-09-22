@@ -16,6 +16,7 @@ import { UsersManagementView } from './components/UsersManagementView';
 import { SettingsView } from './components/SettingsView';
 import { AiStatusBanner } from './components/AiStatusBanner';
 import { NetlifyGeminiModal } from './components/NetlifyGeminiModal';
+import { PasswordResetModal } from './components/PasswordResetModal';
 import { useAuth } from './context/AuthContext';
 import { USER_SAMPLE_DATA } from './data/sampleData';
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
@@ -667,6 +668,7 @@ export default function App() {
         <AuthLandingScreen
           onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
         />
+        <PasswordResetModal />
         <SupabaseModal
           isOpen={isSupabaseModalOpen}
           onClose={() => setIsSupabaseModalOpen(false)}
@@ -886,6 +888,7 @@ export default function App() {
         onConnectionChange={() => setSyncVersion((v) => v + 1)}
       />
 
+      <PasswordResetModal />
       <OfflineIndicator />
     </div>
   );

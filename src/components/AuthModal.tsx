@@ -593,14 +593,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {tab === 'reset-code' && (
             <div className="space-y-4">
               {/* Security info card: instructions to check email */}
-              <div className="p-3.5 bg-indigo-50/90 border border-indigo-200/90 rounded-xl text-xs space-y-1.5 animate-fade-in">
+              <div className="p-3.5 bg-indigo-50/90 border border-indigo-200/90 rounded-xl text-xs space-y-2 animate-fade-in">
                 <div className="flex items-center gap-2 font-semibold text-xs text-indigo-950">
                   <Mail className="w-4 h-4 text-indigo-600 shrink-0" />
-                  <span>Código enviado a tu correo electrónico</span>
+                  <span>Correo de recuperación enviado a {recoveryEmail || email}</span>
                 </div>
-                <p className="text-[11px] text-indigo-900/90 leading-relaxed">
-                  Hemos enviado un código de verificación a <strong className="font-semibold text-indigo-950">{recoveryEmail || email}</strong>. Abre tu correo, copia los 6 dígitos y pégalos a continuación junto con tu nueva clave.
-                </p>
+                <div className="text-[11px] text-indigo-900/90 space-y-1.5 leading-relaxed">
+                  <p>
+                    🔗 <strong>Si recibes un enlace/botón ("Restablecer contraseña"):</strong> Haz clic directamente en él desde tu correo. La aplicación se abrirá automáticamente para que elijas tu nueva contraseña sin necesidad de código numérico.
+                  </p>
+                  <p>
+                    🔢 <strong>Si tu correo incluye un código de 6 dígitos:</strong> Puedes introducirlo abajo junto a tu nueva clave.
+                  </p>
+                </div>
               </div>
 
               <form onSubmit={handleResetPasswordSubmit} className="space-y-3">
