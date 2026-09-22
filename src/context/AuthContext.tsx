@@ -2,6 +2,12 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { UserProfile } from '../types';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
 import { DatabaseService } from '../services/dbService';
+import {
+  getLockoutState,
+  recordFailedAttempt,
+  recordSuccessfulLogin,
+  formatRemainingLockout,
+} from '../services/loginRateLimitService';
 
 export interface DemoTeamMember {
   id: string;
@@ -52,6 +58,30 @@ interface AuthContextType {
   deleteUser: (userId: string) => Promise<{ success: boolean; error?: string }>;
   createUser: (userData: { email: string; fullName: string; role: 'admin' | 'user' | 'editor'; avatarUrl?: string; password?: string }) => Promise<{ success: boolean; error?: string }>;
   refreshUsers: () => Promise<void>;
+  checkUserExists: (email: string) => boolean;
+  getLoginLockout: (email?: string) => {
+    isLocked: boolean;
+    remainingSeconds: number;
+    attempts: number;
+    maxAttempts: number;
+  };
+  requestPasswordReset: (email: string) => Promise<{
+    success: boolean;
+    isSupabase?: boolean;
+    code?: string;
+    expiresAt?: number;
+    error?: string;
+    message?: string;
+  }>;
+  resetPasswordWithCode: (
+    email: string,
+    code: string,
+    newPassword: string
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    message?: string;
+  }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -211,28 +241,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [isSupabase]);
 
   const login = async (email: string, password?: string) => {
+    const cleanEmail = (email || '').trim().toLowerCase();
+
+    // Check if account/device is locked out due to 3 failed attempts
+    const lockout = getLockoutState(cleanEmail);
+    if (lockout.isLocked) {
+      return {
+        success: false,
+        error: `Has alcanzado el límite de 3 errores de inicio de sesión. Por motivos de seguridad, el acceso está bloqueado temporalmente. Debes esperar ${formatRemainingLockout(lockout.remainingSeconds)} antes de volver a intentarlo.`,
+      };
+    }
+
     if (isSupabase) {
       const supabase = getSupabaseClient();
       if (!supabase) return { success: false, error: 'Supabase no inicializado' };
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: cleanEmail,
         password: password || '',
       });
       if (error) {
+        // Record failed attempt
+        const failRecord = recordFailedAttempt(cleanEmail);
+        if (failRecord.isLocked) {
+          return {
+            success: false,
+            error: `Has alcanzado el límite de 3 errores. Tu acceso ha sido bloqueado durante 10 minutos. Por favor espera antes de volver a intentarlo.`,
+          };
+        }
         if (error.message.toLowerCase().includes('email not confirmed')) {
           return {
             success: false,
             error: 'Este correo aún no ha sido confirmado en Supabase. Puedes desactivar la confirmación en Supabase (Authentication -> Providers -> Email -> Desactivar "Confirm email") para que los usuarios accedan de inmediato.',
           };
         }
-        if (error.message.toLowerCase().includes('invalid login credentials')) {
-          return {
-            success: false,
-            error: 'Credenciales incorrectas. Verifica el correo y la contraseña.',
-          };
-        }
-        return { success: false, error: error.message };
+        return {
+          success: false,
+          error: `Credenciales incorrectas (error ${failRecord.attempts} de 3). Te queda${failRecord.remainingAttempts === 1 ? '' : 'n'} ${failRecord.remainingAttempts} intento${failRecord.remainingAttempts === 1 ? '' : 's'} antes de un bloqueo de 10 minutos.`,
+        };
       }
+      // Successful login
+      recordSuccessfulLogin(cleanEmail);
       if (data.user) {
         setUser({
           id: data.user.id,
@@ -245,11 +293,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: true };
     } else {
       // Central database authentication
-      const cleanEmail = email.trim().toLowerCase();
-
       // Try central database first
       const serverLogin = await DatabaseService.login(cleanEmail, password?.trim());
       if (serverLogin.success && serverLogin.user) {
+        recordSuccessfulLogin(cleanEmail);
         const loggedUser: UserProfile = {
           ...serverLogin.user,
           role: cleanEmail === 'sillescas2@gmail.com' ? 'admin' : serverLogin.user.role,
@@ -259,13 +306,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: true };
       }
 
+      // If server returned an explicit lockout response
+      if (serverLogin.error && serverLogin.error.includes('bloqueado')) {
+        recordFailedAttempt(cleanEmail);
+        return { success: false, error: serverLogin.error };
+      }
+
       // Fallback to local memory / available users list
       let found = availableUsers.find((u) => u.email.toLowerCase() === cleanEmail);
 
       if (!found) {
+        const failRecord = recordFailedAttempt(cleanEmail);
         return {
           success: false,
-          error: 'No se encontró ningún usuario con este correo. Contacta al administrador para que cree tu cuenta.',
+          error: failRecord.isLocked
+            ? 'Has alcanzado el límite de 3 errores. Tu acceso está bloqueado durante 10 minutos.'
+            : `No se encontró ningún usuario con este correo (error ${failRecord.attempts} de 3). Te queda${failRecord.remainingAttempts === 1 ? '' : 'n'} ${failRecord.remainingAttempts} intento${failRecord.remainingAttempts === 1 ? '' : 's'}.`,
         };
       }
 
@@ -275,10 +331,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return { success: false, error: 'Por favor, introduce la contraseña para este usuario.' };
         }
         if (found.password !== password.trim()) {
-          return { success: false, error: 'Contraseña incorrecta. Por favor, verifica tus datos.' };
+          const failRecord = recordFailedAttempt(cleanEmail);
+          return {
+            success: false,
+            error: failRecord.isLocked
+              ? 'Has alcanzado el límite de 3 errores. Tu acceso está bloqueado durante 10 minutos.'
+              : `Contraseña incorrecta (error ${failRecord.attempts} de 3). Te queda${failRecord.remainingAttempts === 1 ? '' : 'n'} ${failRecord.remainingAttempts} intento${failRecord.remainingAttempts === 1 ? '' : 's'} antes del bloqueo de 10 minutos.`,
+          };
         }
       }
 
+      // Successful local login
+      recordSuccessfulLogin(cleanEmail);
       setUser(found);
       localStorage.setItem(LOCAL_ACTIVE_USER_KEY, found.id);
       return { success: true };
@@ -366,6 +430,187 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       role: targetUser.role,
     });
     localStorage.setItem(LOCAL_ACTIVE_USER_KEY, targetUser.id);
+  };
+
+  const checkUserExists = (rawEmail: string): boolean => {
+    const cleanEmail = (rawEmail || '').trim().toLowerCase();
+    if (!cleanEmail) return false;
+    return availableUsers.some((u) => u.email.toLowerCase() === cleanEmail);
+  };
+
+  const requestPasswordReset = async (
+    rawEmail: string
+  ): Promise<{
+    success: boolean;
+    isSupabase?: boolean;
+    code?: string;
+    expiresAt?: number;
+    error?: string;
+    message?: string;
+  }> => {
+    const cleanEmail = (rawEmail || '').trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return { success: false, error: 'Por favor, introduce un correo electrónico válido.' };
+    }
+
+    // Check if user exists in local availableUsers
+    const existingUser = availableUsers.find(
+      (u) => u.email.toLowerCase() === cleanEmail
+    );
+
+    // If Supabase mode is configured
+    if (isSupabase) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+            redirectTo: typeof window !== 'undefined' ? `${window.location.origin}` : undefined,
+          });
+          if (error) {
+            return { success: false, error: error.message };
+          }
+          return {
+            success: true,
+            isSupabase: true,
+            message: `Se ha enviado un enlace de recuperación oficial de Supabase a ${cleanEmail}. Revisa tu bandeja de entrada o spam.`,
+          };
+        } catch (err: any) {
+          return { success: false, error: err.message || 'Error al solicitar restablecimiento en Supabase.' };
+        }
+      }
+    }
+
+    // Built-in / Local / Central Database mode:
+    const serverRes = await DatabaseService.requestPasswordReset(cleanEmail);
+
+    if (serverRes.success && serverRes.code) {
+      const expiresAt = serverRes.expiresAt || (Date.now() + 15 * 60 * 1000);
+      try {
+        sessionStorage.setItem(
+          `reewai_pwd_reset_${cleanEmail}`,
+          JSON.stringify({ code: serverRes.code, expiresAt })
+        );
+      } catch (e) {}
+
+      return {
+        success: true,
+        isSupabase: false,
+        code: serverRes.code,
+        expiresAt,
+        message: 'Código de recuperación generado con éxito.',
+      };
+    }
+
+    // If server says user not found and we also do not have it locally
+    if (!existingUser && !serverRes.success) {
+      return {
+        success: false,
+        error: `No existe ninguna cuenta registrada con el correo "${cleanEmail}". Verifica la dirección o crea una cuenta nueva.`,
+      };
+    }
+
+    // Fallback if server offline or standalone preview
+    const fallbackCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 15 * 60 * 1000;
+    try {
+      sessionStorage.setItem(
+        `reewai_pwd_reset_${cleanEmail}`,
+        JSON.stringify({ code: fallbackCode, expiresAt })
+      );
+    } catch (e) {}
+
+    return {
+      success: true,
+      isSupabase: false,
+      code: fallbackCode,
+      expiresAt,
+      message: 'Código de recuperación de 6 dígitos generado para tu cuenta.',
+    };
+  };
+
+  const resetPasswordWithCode = async (
+    rawEmail: string,
+    rawCode: string,
+    rawNewPassword: string
+  ): Promise<{ success: boolean; error?: string; message?: string }> => {
+    const cleanEmail = (rawEmail || '').trim().toLowerCase();
+    const cleanCode = (rawCode || '').trim();
+    const cleanPassword = (rawNewPassword || '').trim();
+
+    if (!cleanEmail || !cleanCode || !cleanPassword) {
+      return { success: false, error: 'Por favor, completa todos los campos requeridos.' };
+    }
+
+    if (cleanPassword.length < 6) {
+      return { success: false, error: 'La nueva contraseña debe contener al menos 6 caracteres.' };
+    }
+
+    // Verify code from session storage if present
+    let cachedData: { code: string; expiresAt: number } | null = null;
+    try {
+      const stored = sessionStorage.getItem(`reewai_pwd_reset_${cleanEmail}`);
+      if (stored) {
+        cachedData = JSON.parse(stored);
+      }
+    } catch (e) {}
+
+    if (cachedData) {
+      if (Date.now() > cachedData.expiresAt) {
+        sessionStorage.removeItem(`reewai_pwd_reset_${cleanEmail}`);
+        return {
+          success: false,
+          error: 'El código de recuperación ha expirado. Por favor solicita uno nuevo.',
+        };
+      }
+      if (cachedData.code !== cleanCode) {
+        return {
+          success: false,
+          error: 'El código de recuperación es incorrecto. Verifica los 6 dígitos introducidos.',
+        };
+      }
+    }
+
+    // Call server to reset in central DB
+    await DatabaseService.resetPassword(cleanEmail, cleanCode, cleanPassword);
+
+    // Also update Supabase if configured
+    if (isSupabase) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          await supabase.auth.updateUser({ password: cleanPassword });
+        } catch (e) {
+          console.warn('Notice updating password in Supabase:', e);
+        }
+      }
+    }
+
+    // Update local availableUsers
+    const userIndex = availableUsers.findIndex(
+      (u) => u.email.toLowerCase() === cleanEmail
+    );
+
+    if (userIndex >= 0) {
+      const updatedList = availableUsers.map((u) =>
+        u.email.toLowerCase() === cleanEmail ? { ...u, password: cleanPassword } : u
+      );
+      setAvailableUsers(updatedList);
+      localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(updatedList));
+
+      if (user && user.email.toLowerCase() === cleanEmail) {
+        setUser({ ...user, password: cleanPassword });
+      }
+    }
+
+    // Invalidate session storage code
+    try {
+      sessionStorage.removeItem(`reewai_pwd_reset_${cleanEmail}`);
+    } catch (e) {}
+
+    return {
+      success: true,
+      message: '¡Contraseña restablecida correctamente! Ya puedes iniciar sesión con tu nueva clave.',
+    };
   };
 
   const refreshUsers = async () => {
@@ -730,6 +975,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         deleteUser,
         createUser,
         refreshUsers,
+        checkUserExists,
+        getLoginLockout: (email?: string) => getLockoutState(email),
+        requestPasswordReset,
+        resetPasswordWithCode,
       }}
     >
       {children}

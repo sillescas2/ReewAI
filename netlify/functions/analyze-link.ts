@@ -46,7 +46,10 @@ export const handler = async (event: NetlifyEvent) => {
       allowedCategories = [],
       categoryObjects = [],
       userId,
+      apiKey: providedApiKey,
     } = body;
+
+    const apiKey = (providedApiKey || event.headers['x-gemini-api-key'] || '').trim() || process.env.GEMINI_API_KEY;
 
     if (!url || typeof url !== 'string' || !url.trim()) {
       return {
@@ -68,9 +71,10 @@ export const handler = async (event: NetlifyEvent) => {
       allowedCategories,
       categoryObjects,
       userId,
+      apiKey: apiKey || undefined,
     });
 
-    const hasKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 5);
+    const hasKey = Boolean(apiKey && apiKey.trim().length > 5);
 
     return {
       statusCode: 200,

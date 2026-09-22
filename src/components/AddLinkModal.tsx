@@ -12,13 +12,24 @@ import {
   Check,
   Tag,
   Clock,
-  BookOpen
+  BookOpen,
+  Lock
 } from 'lucide-react';
 import { SavedLinkItem, AnalyzeLinkResponse, PlatformType, CategoryItem } from '../types';
 import { APP_VERSION } from '../constants/version';
 import { getPlatformInfo } from '../utils/platformHelper';
 import { analyzeLinkClientFallback, detectClientPlatform } from '../lib/clientLinkAnalyzer';
 import { useAiStatus } from '../services/aiStatusService';
+import { useAuth } from '../context/AuthContext';
+import { getActiveGeminiApiKey } from '../services/systemSettingsService';
+import {
+  canUseAiSave,
+  getAiSavesRemaining,
+  getAiSavesUsed,
+  recordAiSave,
+  isUserAdmin,
+  MAX_NON_ADMIN_AI_SAVES
+} from '../services/aiQuotaService';
 
 function deriveDirectUrlTitle(url: string): string {
   try {
@@ -56,6 +67,21 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
   onOpenGeminiGuide,
 }) => {
   const { isKeyMissing } = useAiStatus();
+  const { user } = useAuth();
+  const isAdmin = isUserAdmin(user);
+  const [quotaTick, setQuotaTick] = useState(0);
+
+  // Subscribe to quota updates
+  useEffect(() => {
+    const onQuotaUpdate = () => setQuotaTick((t) => t + 1);
+    window.addEventListener('reewai-ai-quota-updated', onQuotaUpdate);
+    return () => window.removeEventListener('reewai-ai-quota-updated', onQuotaUpdate);
+  }, []);
+
+  const aiRemaining = getAiSavesRemaining(user);
+  const aiUsed = getAiSavesUsed(user?.id || user?.email);
+  const hasAiQuota = canUseAiSave(user);
+
   const [url, setUrl] = useState(initialUrl || '');
   const [manualTitle, setManualTitle] = useState('');
   const [manualSummary, setManualSummary] = useState('');
@@ -144,6 +170,13 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
     e.preventDefault();
     if (!url.trim()) return;
 
+    if (!isAdmin && !hasAiQuota) {
+      setErrorMessage(
+        'Has alcanzado el límite de 3 guardados con IA para cuentas estándar. Puedes guardar el enlace directamente de forma ilimitada usando el botón "Guardar sin analizar" (Modo Básico), o solicitar al administrador una cuenta con IA ilimitada.'
+      );
+      return;
+    }
+
     setIsAnalyzing(true);
     setErrorMessage(null);
     setAnalysisStep('Conectando con el enlace y extrayendo metadatos...');
@@ -160,9 +193,15 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
       let data: AnalyzeLinkResponse | null = null;
 
       try {
+        const activeApiKey = await getActiveGeminiApiKey(user);
+        const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (activeApiKey) {
+          reqHeaders['x-gemini-api-key'] = activeApiKey;
+        }
+
         const res = await fetch('/api/analyze-link', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: reqHeaders,
           body: JSON.stringify({
             url: url.trim(),
             userNote: userNote.trim() || undefined,
@@ -182,6 +221,7 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
               category: item.category,
               tags: item.tags,
             })),
+            apiKey: activeApiKey || undefined,
           }),
         });
 
@@ -286,6 +326,7 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
         }
       })(),
       userNote: userNote.trim() || undefined,
+      savedWithAi: false,
       createdAt: new Date().toISOString(),
       duplicateCheck: exactDuplicateFound
         ? {
@@ -325,11 +366,17 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
       estimatedTime: analysisResult.estimatedTime,
       authorOrChannel: analysisResult.authorOrChannel,
       userNote: userNote.trim() || undefined,
+      savedWithAi: true,
       createdAt: new Date().toISOString(),
       thumbnailUrl: analysisResult.thumbnailUrl,
       duplicateCheck: analysisResult.duplicateCheck,
       isExactDuplicateOf: exactDuplicateFound ? exactDuplicateFound.id : undefined,
     };
+
+    // Record consumption of 1 AI save for non-admin users
+    if (!isAdmin) {
+      recordAiSave(user?.id || user?.email);
+    }
 
     onSaveItem(newItem);
     onClose();
@@ -396,6 +443,37 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
                     )}
                   </div>
                 </div>
+              )}
+
+              {/* AI Quota Notice for Non-Admin Users */}
+              {!isAdmin && (
+                hasAiQuota ? (
+                  <div className="p-3 bg-indigo-50/80 border border-indigo-200/90 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 text-indigo-950 font-medium">
+                      <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span>
+                        Cuenta estándar: Te queda<strong>{aiRemaining === 1 ? '' : 'n'} {aiRemaining} de {MAX_NON_ADMIN_AI_SAVES} guardado{aiRemaining === 1 ? '' : 's'} con IA</strong>.
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-neutral-500 font-semibold bg-white px-2 py-0.5 rounded-md border border-neutral-200 shrink-0">
+                      Administradores: IA Ilimitada
+                    </span>
+                  </div>
+                ) : (
+                  <div className="p-3.5 bg-amber-50 border-2 border-amber-300 rounded-xl text-xs text-amber-950 space-y-1.5 animate-in fade-in">
+                    <div className="flex items-start gap-2.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-amber-950 text-xs">
+                          ⚠️ Límite de 3 guardados con IA alcanzado
+                        </p>
+                        <p className="text-amber-800 leading-relaxed mt-0.5">
+                          Como usuario no administrador has utilizado tus 3 guardados con IA disponibles. Puedes seguir guardando enlaces de forma <strong>ilimitada</strong> pulsando el botón <strong>"Guardar sin analizar"</strong> abajo.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )
               )}
 
               {/* URL Input */}
@@ -628,21 +706,39 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
                     type="button"
                     onClick={handleSaveDirect}
                     disabled={isAnalyzing || !url.trim()}
-                    className="inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 bg-white hover:bg-neutral-50 active:scale-[0.98] disabled:opacity-50 text-neutral-700 hover:text-neutral-900 border border-neutral-300 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer shadow-2xs"
-                    title="Guarda directamente la nota y el enlace sin analizar con IA"
+                    className={`inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer shadow-2xs ${
+                      !isAdmin && !hasAiQuota
+                        ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-2 border-emerald-500 font-bold'
+                        : 'bg-white hover:bg-neutral-50 active:scale-[0.98] disabled:opacity-50 text-neutral-700 hover:text-neutral-900 border border-neutral-300'
+                    }`}
+                    title="Guarda directamente la nota y el enlace sin consumir cuota de IA"
                   >
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>Guardar sin analizar</span>
+                    <CheckCircle2 className={`w-4 h-4 shrink-0 ${!isAdmin && !hasAiQuota ? 'text-emerald-700' : 'text-emerald-600'}`} />
+                    <span>{!isAdmin && !hasAiQuota ? 'Guardar sin analizar (Ilimitado)' : 'Guardar sin analizar'}</span>
                   </button>
 
                   {/* Option: Analizar y Resumir con IA */}
                   <button
                     id="btn-submit-analyze"
                     type="submit"
-                    disabled={isAnalyzing || !url.trim()}
-                    className="inline-flex items-center gap-2 px-4 sm:px-5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] disabled:opacity-50 text-white rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-sm shadow-indigo-600/20 cursor-pointer"
+                    disabled={isAnalyzing || !url.trim() || (!isAdmin && !hasAiQuota)}
+                    className={`inline-flex items-center gap-2 px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+                      !isAdmin && !hasAiQuota
+                        ? 'bg-neutral-100 text-neutral-400 border border-neutral-200 cursor-not-allowed'
+                        : 'bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] disabled:opacity-50 text-white shadow-sm shadow-indigo-600/20'
+                    }`}
+                    title={
+                      !isAdmin && !hasAiQuota
+                        ? 'Límite de 3 guardados con IA alcanzado. Usa "Guardar sin analizar".'
+                        : 'Analizar y resumir contenido con Inteligencia Artificial'
+                    }
                   >
-                    {isAnalyzing ? (
+                    {!isAdmin && !hasAiQuota ? (
+                      <>
+                        <Lock className="w-4 h-4 text-neutral-400" />
+                        <span>Límite IA alcanzado (3/3)</span>
+                      </>
+                    ) : isAnalyzing ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
                         <span>Analizando...</span>
@@ -852,19 +948,24 @@ export const AddLinkModal: React.FC<AddLinkModalProps> = ({
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-neutral-100">
                 <button
                   type="button"
                   onClick={() => setAnalysisResult(null)}
-                  className="text-xs text-neutral-600 hover:text-neutral-900 font-medium px-3 py-1.5"
+                  className="text-xs text-neutral-600 hover:text-neutral-900 font-medium px-2 py-1.5 cursor-pointer"
                 >
                   ← Analizar otro enlace
                 </button>
                 <div className="flex items-center gap-2">
+                  {!isAdmin && (
+                    <span className="text-[11px] text-neutral-500 font-medium hidden sm:inline mr-1">
+                      Guardar con IA ({aiRemaining} de 3 restantes)
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={onClose}
-                    className="px-4 py-2 text-xs sm:text-sm font-medium text-neutral-600 hover:text-neutral-900 bg-neutral-100 hover:bg-neutral-200 rounded-xl"
+                    className="px-4 py-2 text-xs sm:text-sm font-medium text-neutral-600 hover:text-neutral-900 bg-neutral-100 hover:bg-neutral-200 rounded-xl cursor-pointer"
                   >
                     Cancelar
                   </button>

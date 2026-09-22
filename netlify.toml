@@ -14,6 +14,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/auth/forgot-password"
+  to = "/.netlify/functions/auth-password?action=forgot"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth/reset-password"
+  to = "/.netlify/functions/auth-password?action=reset"
+  status = 200
+
+[[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200

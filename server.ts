@@ -517,19 +517,25 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
-// AI Configuration Status (Checks whether GEMINI_API_KEY is defined in environment)
+// AI Configuration Status (Checks whether GEMINI_API_KEY is defined in environment or database/app)
 app.get('/api/ai-status', (req: Request, res: Response) => {
-  const rawKey = process.env.GEMINI_API_KEY;
+  const headerKey = (req.headers['x-gemini-api-key'] as string) || (req.query.testKey as string);
+  const rawKey = (headerKey || '').trim() || process.env.GEMINI_API_KEY;
   const hasKey = Boolean(rawKey && rawKey.trim().length > 5);
+  const source = headerKey ? 'database_or_app' : (process.env.GEMINI_API_KEY ? 'server_env' : 'none');
+
   res.json({
     success: true,
     configured: hasKey,
     hasKey,
     missingKey: !hasKey,
+    source,
     provider: 'Google Gemini AI',
     environment: process.env.NETLIFY ? 'netlify' : 'node',
     message: hasKey
-      ? 'La variable GEMINI_API_KEY está configurada y lista.'
+      ? (source === 'database_or_app'
+          ? 'GEMINI_API_KEY activa desde Supabase / Configuración de Administrador.'
+          : 'La variable GEMINI_API_KEY está configurada en las variables de entorno.')
       : 'La variable de entorno GEMINI_API_KEY no está configurada.',
     setupGuide: {
       variableName: 'GEMINI_API_KEY',
@@ -738,6 +744,10 @@ app.delete('/api/users/:id', (req: Request, res: Response) => {
   res.json({ success: true, deletedId: id });
 });
 
+// Login attempt tracking & lockout map (max 3 errors, 10 min lockout)
+const serverLoginAttempts = new Map<string, { attempts: number; lockedUntil?: number }>();
+const SERVER_LOCKOUT_MS = 10 * 60 * 1000; // 10 minutes
+
 // Login endpoint
 app.post('/api/auth/login', (req: Request, res: Response) => {
   const { email, password } = req.body;
@@ -745,20 +755,69 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: 'Email requerido.' });
   }
 
-  const user = db.getUserByEmail(email);
+  const cleanEmail = email.trim().toLowerCase();
+  const now = Date.now();
+  const attemptRecord = serverLoginAttempts.get(cleanEmail);
+
+  // Check if locked
+  if (attemptRecord?.lockedUntil && attemptRecord.lockedUntil > now) {
+    const remainingSeconds = Math.ceil((attemptRecord.lockedUntil - now) / 1000);
+    const mins = Math.floor(remainingSeconds / 60);
+    const secs = remainingSeconds % 60;
+    return res.status(429).json({
+      success: false,
+      isLocked: true,
+      remainingSeconds,
+      error: `Has alcanzado el límite de 3 errores. Por seguridad, debes esperar ${mins}m ${secs}s antes de volver a intentarlo.`,
+    });
+  }
+
+  // Clear expired lock
+  if (attemptRecord?.lockedUntil && attemptRecord.lockedUntil <= now) {
+    serverLoginAttempts.delete(cleanEmail);
+  }
+
+  const user = db.getUserByEmail(cleanEmail);
   if (!user) {
+    const current = (serverLoginAttempts.get(cleanEmail)?.attempts || 0) + 1;
+    if (current >= 3) {
+      serverLoginAttempts.set(cleanEmail, { attempts: current, lockedUntil: now + SERVER_LOCKOUT_MS });
+      return res.status(429).json({
+        success: false,
+        isLocked: true,
+        remainingSeconds: Math.ceil(SERVER_LOCKOUT_MS / 1000),
+        error: 'Has alcanzado el límite de 3 errores de acceso. Acceso bloqueado durante 10 minutos.',
+      });
+    }
+    serverLoginAttempts.set(cleanEmail, { attempts: current });
+    const remaining = 3 - current;
     return res.status(404).json({
       success: false,
-      error: 'Usuario no encontrado con este correo en la base de datos.',
+      error: `Usuario no encontrado. Te queda${remaining === 1 ? '' : 'n'} ${remaining} intento${remaining === 1 ? '' : 's'} antes del bloqueo de 10 minutos.`,
     });
   }
 
   if (user.password && user.password !== password) {
+    const current = (serverLoginAttempts.get(cleanEmail)?.attempts || 0) + 1;
+    if (current >= 3) {
+      serverLoginAttempts.set(cleanEmail, { attempts: current, lockedUntil: now + SERVER_LOCKOUT_MS });
+      return res.status(429).json({
+        success: false,
+        isLocked: true,
+        remainingSeconds: Math.ceil(SERVER_LOCKOUT_MS / 1000),
+        error: 'Has alcanzado el límite de 3 errores de contraseña. Acceso bloqueado durante 10 minutos.',
+      });
+    }
+    serverLoginAttempts.set(cleanEmail, { attempts: current });
+    const remaining = 3 - current;
     return res.status(401).json({
       success: false,
-      error: 'Contraseña incorrecta. Por favor, verifica tus datos.',
+      error: `Contraseña incorrecta (intento ${current} de 3). Te queda${remaining === 1 ? '' : 'n'} ${remaining} intento${remaining === 1 ? '' : 's'} antes del bloqueo de 10 minutos.`,
     });
   }
+
+  // Successful login -> clear failed attempts
+  serverLoginAttempts.delete(cleanEmail);
 
   res.json({
     success: true,
@@ -801,6 +860,57 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
       avatarUrl: result.user?.avatarUrl,
       createdAt: result.user?.createdAt,
     },
+  });
+});
+
+// Forgot password - Request recovery code for registered user
+app.post('/api/auth/forgot-password', (req: Request, res: Response) => {
+  const { email } = req.body;
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    return res.status(400).json({
+      success: false,
+      error: 'Por favor, proporciona un correo electrónico válido.',
+    });
+  }
+
+  const result = db.generatePasswordResetCode(email);
+  if (!result.success) {
+    return res.status(404).json({
+      success: false,
+      error: result.error || 'Usuario no encontrado.',
+    });
+  }
+
+  res.json({
+    success: true,
+    message: 'Código de recuperación generado con éxito.',
+    email: result.user?.email,
+    code: result.code,
+    expiresAt: result.expiresAt,
+  });
+});
+
+// Reset password - Verify code and set new password
+app.post('/api/auth/reset-password', (req: Request, res: Response) => {
+  const { email, code, newPassword } = req.body;
+  if (!email || !code || !newPassword) {
+    return res.status(400).json({
+      success: false,
+      error: 'Todos los campos son obligatorios (correo, código y nueva contraseña).',
+    });
+  }
+
+  const result = db.verifyAndResetPassword(email, code, newPassword);
+  if (!result.success) {
+    return res.status(400).json({
+      success: false,
+      error: result.error || 'No se pudo restablecer la contraseña.',
+    });
+  }
+
+  res.json({
+    success: true,
+    message: '¡Contraseña actualizada con éxito! Ya puedes iniciar sesión con tu nueva contraseña.',
   });
 });
 
@@ -881,7 +991,8 @@ app.delete('/api/categories/:id', (req: Request, res: Response) => {
 // Analyze link with Gemini AI (Metadata + Summary + Topic Duplicate Check)
 app.post('/api/analyze-link', async (req: Request, res: Response) => {
   try {
-    const { url, userNote, manualTitle, manualSummary, existingItems = [], allowedCategories = [], categoryObjects: providedCategories, userId } = req.body;
+    const { url, userNote, manualTitle, manualSummary, existingItems = [], allowedCategories = [], categoryObjects: providedCategories, userId, apiKey: providedKey } = req.body;
+    const apiKey = (providedKey || (req.headers['x-gemini-api-key'] as string) || '').trim() || process.env.GEMINI_API_KEY;
 
     if (!url || typeof url !== 'string' || !url.trim()) {
       return res.status(400).json({ success: false, error: 'Por favor ingresa una URL válida.' });
@@ -920,9 +1031,10 @@ app.post('/api/analyze-link', async (req: Request, res: Response) => {
       allowedCategories,
       categoryObjects,
       userId,
+      apiKey: apiKey || undefined,
     });
 
-    const hasKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 5);
+    const hasKey = Boolean(apiKey && apiKey.trim().length > 5);
 
     return res.json({
       success: true,

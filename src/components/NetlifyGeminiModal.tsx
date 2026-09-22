@@ -197,6 +197,17 @@ export const NetlifyGeminiModal: React.FC<NetlifyGeminiModalProps> = ({ isOpen, 
                 <p className="text-[11px] text-neutral-500 mt-1">
                   En <strong>Value</strong> pega la clave de API que obtuviste en el paso 1 (empieza por <code>AIza...</code>).
                 </p>
+
+                {/* Critical tip for deploy contexts */}
+                <div className="mt-2.5 p-2.5 bg-amber-50 rounded-lg border border-amber-200/90 text-amber-900 text-xs space-y-1">
+                  <p className="font-bold flex items-center gap-1 text-[11px]">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    Atención al "Deploy Context" en Netlify:
+                  </p>
+                  <p className="text-[11px] text-amber-800 leading-snug">
+                    Asegúrate de que la variable tenga <strong>"Same value in all deploy contexts"</strong> (igual que tus claves de Supabase). Si dice <em>"1 value in 1 deploy context"</em>, Netlify solo la activará en un único contexto y faltará en producción o ramas de despliegue. Pulsa en la flecha de la variable → <strong>Edit</strong> → activa todos los contextos.
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -207,12 +218,15 @@ export const NetlifyGeminiModal: React.FC<NetlifyGeminiModalProps> = ({ isOpen, 
               </span>
               <div className="space-y-1">
                 <p className="font-semibold text-neutral-900 text-xs sm:text-sm flex items-center gap-1.5">
-                  <span>¡Paso crucial! Desplegar de nuevo para aplicar los cambios</span>
+                  <span>¡Paso crucial! Desplegar con "Clear cache and deploy site"</span>
                 </p>
                 <p className="text-xs text-neutral-600">
-                  En Netlify las funciones serverless solo cargan las nuevas variables cuando se hace un nuevo despliegue.
+                  En Netlify, las funciones serverless solo cargan las nuevas variables si compilan desde cero.
                   <br />
-                  En tu panel de Netlify ve a la pestaña <strong>Deploys</strong> → haz clic en el botón desplegable <strong>Trigger deploy</strong> → selecciona <strong>Clear cache and deploy site</strong>.
+                  En tu panel de Netlify ve a la pestaña <strong>Deploys</strong> → haz clic en el botón <strong>Trigger deploy</strong> → selecciona <strong>Clear cache and deploy site</strong>. (Un deploy normal suele reutilizar funciones cacheadas).
+                </p>
+                <p className="text-[11px] text-neutral-500 pt-1">
+                  <strong>Nota sobre la vista previa:</strong> Esta ventana de Google AI Studio es un entorno de desarrollo independiente. Las variables guardadas en Netlify se reflejan en tu dirección web pública de Netlify (ej. <code>https://tu-proyecto.netlify.app</code>).
                 </p>
               </div>
             </div>

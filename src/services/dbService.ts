@@ -334,6 +334,60 @@ export class DatabaseService {
     }
   }
 
+  static async requestPasswordReset(
+    email: string
+  ): Promise<{ success: boolean; code?: string; expiresAt?: number; message?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const parsed = await safeParseJson(res);
+      if (!parsed.isJson || !res.ok || !parsed.data?.success) {
+        return {
+          success: false,
+          error: parsed.data?.error || 'No se encontró ningún usuario dado de alta con este correo.',
+        };
+      }
+      return {
+        success: true,
+        code: parsed.data.code,
+        expiresAt: parsed.data.expiresAt,
+        message: parsed.data.message,
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Error de conexión con el servidor.' };
+    }
+  }
+
+  static async resetPassword(
+    email: string,
+    code: string,
+    newPassword: string
+  ): Promise<{ success: boolean; message?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code, newPassword }),
+      });
+      const parsed = await safeParseJson(res);
+      if (!parsed.isJson || !res.ok || !parsed.data?.success) {
+        return {
+          success: false,
+          error: parsed.data?.error || 'No se pudo restablecer la contraseña.',
+        };
+      }
+      return {
+        success: true,
+        message: parsed.data.message || '¡Contraseña actualizada con éxito!',
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Error de conexión con el servidor.' };
+    }
+  }
+
   static async updateUser(id: string, updates: Partial<UserProfile>): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
     try {
       const res = await fetch(`/api/users/${encodeURIComponent(id)}`, {

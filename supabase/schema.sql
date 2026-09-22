@@ -206,3 +206,58 @@ VALUES
   (NULL, 'Salud & Bienestar', '#06B6D4'),
   (NULL, 'General', '#64748B')
 ON CONFLICT (user_id, name) DO NOTHING;
+
+-- ==============================================================================
+-- 8. TABLA DE CONFIGURACIÓN DEL SISTEMA Y CLAVES SEGURAS (public.system_settings)
+-- Almacena claves (como GEMINI_API_KEY) protegidas con RLS estricto para administradores
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.system_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  description TEXT,
+  updated_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+COMMENT ON TABLE public.system_settings IS 'Parámetros de configuración del sistema y claves gestionadas por administradores';
+
+DROP TRIGGER IF EXISTS set_system_settings_updated_at ON public.system_settings;
+CREATE TRIGGER set_system_settings_updated_at
+  BEFORE UPDATE ON public.system_settings
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_updated_at();
+
+-- Habilitar Row Level Security (RLS)
+ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
+
+-- Políticas de seguridad para administradores:
+-- Lectura: Solo administradores
+DROP POLICY IF EXISTS "Solo administradores pueden leer la configuración del sistema" ON public.system_settings;
+CREATE POLICY "Solo administradores pueden leer la configuración del sistema"
+  ON public.system_settings FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE profiles.id = auth.uid() AND (profiles.role = 'admin' OR profiles.email = 'sillescas2@gmail.com')
+    )
+  );
+
+-- Escritura/Modificación: Solo administradores
+DROP POLICY IF EXISTS "Solo administradores pueden modificar la configuración" ON public.system_settings;
+CREATE POLICY "Solo administradores pueden modificar la configuración"
+  ON public.system_settings FOR ALL
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE profiles.id = auth.uid() AND (profiles.role = 'admin' OR profiles.email = 'sillescas2@gmail.com')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.profiles
+      WHERE profiles.id = auth.uid() AND (profiles.role = 'admin' OR profiles.email = 'sillescas2@gmail.com')
+    )
+  );

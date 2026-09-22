@@ -23,6 +23,8 @@ import {
 import { SavedLinkItem, CategoryItem } from '../types';
 import { APP_VERSION } from '../constants/version';
 import { getPlatformInfo, formatDate, formatTimeAgo } from '../utils/platformHelper';
+import { useAuth } from '../context/AuthContext';
+import { canUseAiSave, recordAiSave, isUserAdmin, getAiSavesRemaining } from '../services/aiQuotaService';
 
 interface LinkDetailModalProps {
   item: SavedLinkItem | null;
@@ -49,6 +51,8 @@ export const LinkDetailModal: React.FC<LinkDetailModalProps> = ({
   categoryColors = {},
   onOpenGeminiGuide,
 }) => {
+  const { user } = useAuth();
+  const isAdmin = isUserAdmin(user);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedSummary, setCopiedSummary] = useState(false);
   
@@ -202,6 +206,15 @@ export const LinkDetailModal: React.FC<LinkDetailModalProps> = ({
 
   const handleReanalyzeWithAI = async () => {
     if (!item || isReanalyzing) return;
+
+    if (!isAdmin && !canUseAiSave(user)) {
+      setReanalyzeFeedback({
+        type: 'error',
+        message: 'Has alcanzado el límite de 3 operaciones con IA para cuentas estándar. Contacta a un administrador para tener acceso ilimitado.',
+      });
+      return;
+    }
+
     setIsReanalyzing(true);
     setReanalyzeFeedback(null);
 
@@ -251,6 +264,12 @@ export const LinkDetailModal: React.FC<LinkDetailModalProps> = ({
             message: 'GEMINI_API_KEY no está configurada en Netlify. Los metadatos se actualizaron en modo básico sin transcripción IA.',
           });
         } else {
+          if (!isAdmin && !item.savedWithAi) {
+            recordAiSave(user?.id || user?.email);
+            if (onUpdateItem) {
+              onUpdateItem(item.id, { savedWithAi: true });
+            }
+          }
           setReanalyzeFeedback({ type: 'success', message: '¡Análisis con IA actualizado con éxito!' });
           setTimeout(() => setReanalyzeFeedback(null), 4000);
         }

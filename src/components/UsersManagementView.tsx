@@ -22,12 +22,21 @@ import {
   Lock,
   Eye,
   EyeOff,
-  Key
+  Key,
+  Sparkles,
+  Unlock,
+  Clock
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { UserProfile } from '../types';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { APP_VERSION } from '../constants/version';
+import {
+  getAiSavesUsed,
+  resetAiQuota,
+  MAX_NON_ADMIN_AI_SAVES
+} from '../services/aiQuotaService';
+import { getLockoutState, clearLockout } from '../services/loginRateLimitService';
 
 interface UsersManagementViewProps {
   onBack: () => void;
@@ -49,6 +58,17 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({ onBack
   const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'editor' | 'user'>('all');
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [, setActionTick] = useState(0);
+
+  const handleUnlockUser = (email: string) => {
+    clearLockout(email);
+    setActionTick((t) => t + 1);
+  };
+
+  const handleResetUserAiQuota = (userIdOrEmail: string) => {
+    resetAiQuota(userIdOrEmail);
+    setActionTick((t) => t + 1);
+  };
 
   // Modals inside management
   const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
@@ -390,8 +410,9 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({ onBack
             <thead>
               <tr className="bg-neutral-50/80 border-b border-neutral-200 text-[11px] font-bold text-neutral-500 uppercase tracking-wider">
                 <th className="py-3.5 px-4">Usuario</th>
-                <th className="py-3.5 px-4">Correo Electrónico</th>
+                <th className="py-3.5 px-4">Correo y Seguridad</th>
                 <th className="py-3.5 px-4">Rol en Sistema</th>
+                <th className="py-3.5 px-4">Cuota IA (3 máx)</th>
                 <th className="py-3.5 px-4 hidden md:table-cell">Fecha Registro</th>
                 <th className="py-3.5 px-4 text-right">Acciones</th>
               </tr>
@@ -399,7 +420,7 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({ onBack
             <tbody className="divide-y divide-neutral-100 text-xs">
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-neutral-400">
+                  <td colSpan={6} className="py-12 text-center text-neutral-400">
                     <Users className="w-8 h-8 mx-auto text-neutral-300 mb-2" />
                     <p className="font-semibold text-neutral-700">No se encontraron usuarios</p>
                     <p className="text-[11px] text-neutral-400 mt-0.5">
@@ -410,6 +431,9 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({ onBack
               ) : (
                 filteredUsers.map((u) => {
                   const isCurrent = currentUser?.id === u.id;
+                  const lockout = getLockoutState(u.email);
+                  const aiUsed = getAiSavesUsed(u.id || u.email);
+                  const isAdminRole = u.role === 'admin';
                   const initials = (u.fullName || u.email || 'U')
                     .split(' ')
                     .map((n) => n[0])
@@ -484,6 +508,23 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({ onBack
                               <span>Sin clave asignada</span>
                             </span>
                           )}
+
+                          {/* Login Lockout Alert (3 failed attempts) */}
+                          {lockout.isLocked && (
+                            <div className="flex items-center gap-1.5 mt-1 bg-rose-50 border border-rose-200 text-rose-800 px-2 py-0.5 rounded text-[10px]">
+                              <Clock className="w-3 h-3 text-rose-600 animate-spin" />
+                              <span>Bloqueado ({Math.ceil(lockout.remainingSeconds / 60)} min restantes)</span>
+                              <button
+                                type="button"
+                                onClick={() => handleUnlockUser(u.email)}
+                                className="ml-auto inline-flex items-center gap-0.5 font-bold text-rose-700 hover:text-rose-900 underline cursor-pointer"
+                                title="Desbloquear acceso inmediatamente"
+                              >
+                                <Unlock className="w-2.5 h-2.5" />
+                                Desbloquear
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </td>
 
@@ -511,6 +552,40 @@ export const UsersManagementView: React.FC<UsersManagementViewProps> = ({ onBack
                             <option value="user">Usuario Estándar</option>
                           </select>
                         </div>
+                      </td>
+
+                      {/* AI Quota Column */}
+                      <td className="py-3 px-4">
+                        {isAdminRole ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                            <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
+                            <span>Ilimitada</span>
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                                aiUsed >= MAX_NON_ADMIN_AI_SAVES
+                                  ? 'text-amber-800 bg-amber-50 border-amber-300'
+                                  : 'text-indigo-700 bg-indigo-50 border-indigo-200'
+                              }`}
+                              title={`${aiUsed} de ${MAX_NON_ADMIN_AI_SAVES} guardados con IA utilizados`}
+                            >
+                              <Sparkles className="w-2.5 h-2.5" />
+                              <span>{aiUsed} / {MAX_NON_ADMIN_AI_SAVES}</span>
+                            </span>
+                            {aiUsed > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleResetUserAiQuota(u.id || u.email)}
+                                className="text-[10px] text-neutral-500 hover:text-indigo-600 underline cursor-pointer"
+                                title="Restablecer cuota de IA a 0 usadas"
+                              >
+                                Reiniciar
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       {/* Date Column */}

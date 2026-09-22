@@ -172,6 +172,7 @@ class DatabaseManager {
   private usersCache: UserRecord[] = [];
   private linksCache: LinkRecord[] = [];
   private categoriesCache: CategoryRecord[] = [];
+  private resetCodes: Map<string, { code: string; expiresAt: number }> = new Map();
   private isInitialized = false;
 
   constructor() {
@@ -385,6 +386,97 @@ class DatabaseManager {
     this.linksCache = this.linksCache.filter((l) => l.userId !== id);
     atomicWriteJson(LINKS_FILE, this.linksCache);
 
+    return { success: true };
+  }
+
+  // ================= PASSWORD RECOVERY OPERATIONS =================
+
+  /**
+   * Generates a secure 6-digit recovery code for registered users.
+   * Ensures the user is registered ("dado de alta") before generating code.
+   */
+  public generatePasswordResetCode(email: string): {
+    success: boolean;
+    code?: string;
+    expiresAt?: number;
+    user?: UserRecord;
+    error?: string;
+  } {
+    const cleanEmail = email.trim().toLowerCase();
+    const user = this.getUserByEmail(cleanEmail);
+    if (!user) {
+      return {
+        success: false,
+        error: `No existe ninguna cuenta registrada con el correo "${cleanEmail}". Comprueba que esté bien escrito o regístrate.`,
+      };
+    }
+
+    // Generate 6-digit verification code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 15 * 60 * 1000; // Valid for 15 minutes
+
+    this.resetCodes.set(cleanEmail, { code, expiresAt });
+
+    return {
+      success: true,
+      code,
+      expiresAt,
+      user,
+    };
+  }
+
+  /**
+   * Verifies the recovery code and updates the user's password.
+   */
+  public verifyAndResetPassword(
+    email: string,
+    code: string,
+    newPassword: string
+  ): { success: boolean; error?: string } {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanCode = (code || '').trim();
+    const cleanPassword = (newPassword || '').trim();
+
+    if (!cleanPassword || cleanPassword.length < 6) {
+      return { success: false, error: 'La nueva contraseña debe tener al menos 6 caracteres.' };
+    }
+
+    const user = this.getUserByEmail(cleanEmail);
+    if (!user) {
+      return { success: false, error: 'No se encontró ningún usuario dado de alta con este correo.' };
+    }
+
+    const record = this.resetCodes.get(cleanEmail);
+    if (!record) {
+      return {
+        success: false,
+        error: 'No hay ninguna solicitud de recuperación activa para este correo o el código ha caducado. Solicita uno nuevo.',
+      };
+    }
+
+    if (Date.now() > record.expiresAt) {
+      this.resetCodes.delete(cleanEmail);
+      return {
+        success: false,
+        error: 'El código de recuperación ha expirado. Por favor solicita uno nuevo.',
+      };
+    }
+
+    if (record.code !== cleanCode) {
+      return {
+        success: false,
+        error: 'El código de recuperación es incorrecto. Verifica los 6 dígitos introducidos.',
+      };
+    }
+
+    // Update user password
+    const updateResult = this.updateUser(user.id, { password: cleanPassword });
+    if (!updateResult.success) {
+      return { success: false, error: updateResult.error || 'Error al guardar la nueva contraseña.' };
+    }
+
+    // Invalidate code after successful reset
+    this.resetCodes.delete(cleanEmail);
     return { success: true };
   }
 

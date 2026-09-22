@@ -34,6 +34,8 @@ export const AiStatusBanner: React.FC<AiStatusBannerProps> = ({ onOpenGuide }) =
     return null;
   }
 
+  const isNetlifyEnv = status?.environment === 'netlify';
+
   return (
     <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-rose-600 text-white shadow-sm transition-all duration-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -43,10 +45,14 @@ export const AiStatusBanner: React.FC<AiStatusBannerProps> = ({ onOpenGuide }) =
           </div>
           <div className="min-w-0">
             <p className="font-bold tracking-tight text-white leading-tight">
-              ⚠️ GEMINI_API_KEY no está configurada en tu panel de Netlify
+              {isNetlifyEnv
+                ? '⚠️ GEMINI_API_KEY no detectada activa en tu sitio de Netlify'
+                : '⚠️ GEMINI_API_KEY no configurada en esta vista previa (AI Studio)'}
             </p>
             <p className="text-white/90 text-[11px] truncate leading-tight hidden sm:block">
-              Los reels y enlaces se están guardando en modo básico. Configura la clave para activar la transcripción y categorización con IA.
+              {isNetlifyEnv
+                ? 'Comprueba que la variable esté en "Same value in all deploy contexts" y haz "Clear cache and deploy site".'
+                : 'Si ya la configuraste en Netlify, pruébala directamente abriendo la URL pública de tu web en Netlify.'}
             </p>
           </div>
         </div>

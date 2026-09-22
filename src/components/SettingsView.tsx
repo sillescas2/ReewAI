@@ -26,6 +26,7 @@ import { useAuth } from '../context/AuthContext';
 import { CategoryItem, SavedLinkItem } from '../types';
 import { APP_VERSION } from '../constants/version';
 import { useAiStatus } from '../services/aiStatusService';
+import { AdminGeminiKeySection } from './AdminGeminiKeySection';
 
 interface SettingsViewProps {
   onBack: () => void;
@@ -392,6 +393,9 @@ ON CONFLICT (user_id, name) DO NOTHING;`;
             </div>
           )}
         </div>
+
+        {/* Zona de Administración: Configuración Segura de Gemini API Key en Supabase */}
+        <AdminGeminiKeySection />
 
         {/* 2-Column Grid: Left (Add Category) / Right (Category List) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

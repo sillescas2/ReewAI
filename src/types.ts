@@ -46,6 +46,7 @@ export interface SavedLinkItem {
   thumbnailUrl?: string;
   duplicateCheck?: TopicDuplicateCheck;
   isExactDuplicateOf?: string; // ID of existing link if exact URL was detected
+  savedWithAi?: boolean; // Whether the item was analyzed/saved using AI
 }
 
 export interface AnalyzeLinkRequest {
@@ -92,6 +93,7 @@ export interface AiStatusResponse {
   configured: boolean;
   hasKey: boolean;
   missingKey: boolean;
+  source?: string;
   provider: string;
   environment?: string;
   message: string;

@@ -31,7 +31,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSettings,
   onOpenGeminiGuide,
 }) => {
-  const { isKeyMissing } = useAiStatus();
+  const { isKeyMissing, status } = useAiStatus();
+  const isNetlifyEnv = status?.environment === 'netlify';
   const duplicateCount = items.filter(
     (i) => i.duplicateCheck?.isDuplicateTopic || i.isExactDuplicateOf
   ).length;
@@ -138,10 +139,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                   type="button"
                   onClick={onOpenGeminiGuide}
                   className="inline-flex items-center gap-1.5 text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 px-2.5 py-0.5 rounded-full border border-amber-300 shadow-2xs transition-colors cursor-pointer"
-                  title="Falta configurar GEMINI_API_KEY en Netlify. Haz clic para ver cómo configurarlo."
+                  title={
+                    isNetlifyEnv
+                      ? 'Falta configurar o activar GEMINI_API_KEY en Netlify. Haz clic para ver el diagnóstico.'
+                      : 'GEMINI_API_KEY no detectada en esta vista previa. Si la configuraste en Netlify, pruébala directamente en tu enlace de Netlify.'
+                  }
                 >
                   <AlertTriangle className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
-                  <span>Falta GEMINI_API_KEY en Netlify</span>
+                  <span>
+                    {isNetlifyEnv ? 'Falta GEMINI_API_KEY en Netlify' : 'Falta GEMINI_API_KEY (Vista previa)'}
+                  </span>
                 </button>
               ) : (
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full border border-violet-200">

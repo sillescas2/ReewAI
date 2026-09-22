@@ -9,10 +9,17 @@ import {
   UserCog,
   Camera,
   ChevronRight,
-  Settings
+  Settings,
+  Sparkles
 } from 'lucide-react';
 import { useAuth, DEMO_TEAM_MEMBERS } from '../context/AuthContext';
 import { APP_VERSION } from '../constants/version';
+import {
+  isUserAdmin,
+  getAiSavesRemaining,
+  getAiSavesUsed,
+  MAX_NON_ADMIN_AI_SAVES
+} from '../services/aiQuotaService';
 
 interface UserMenuProps {
   onOpenAuthModal: () => void;
@@ -133,15 +140,39 @@ export const UserMenu: React.FC<UserMenuProps> = ({
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <p className="text-xs font-bold text-neutral-900 truncate">
                     {user.fullName}
                   </p>
                   <span className="text-[9px] font-semibold uppercase px-1.5 py-0.2 bg-indigo-50 text-indigo-700 rounded border border-indigo-200 shrink-0">
-                    {user.role === 'admin' ? 'Admin' : user.role === 'editor' ? 'Editor' : 'Usuario'}
+                    {isUserAdmin(user) ? 'Admin' : user.role === 'editor' ? 'Editor' : 'Usuario'}
                   </span>
                 </div>
                 <p className="text-[11px] text-neutral-500 truncate">{user.email}</p>
+
+                {/* AI Quota Badge */}
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  {isUserAdmin(user) ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                      <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
+                      <span>IA Ilimitada</span>
+                    </span>
+                  ) : (
+                    <span
+                      className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md border ${
+                        getAiSavesRemaining(user) > 0
+                          ? 'text-indigo-700 bg-indigo-50 border-indigo-200'
+                          : 'text-amber-800 bg-amber-50 border-amber-300'
+                      }`}
+                      title={`${getAiSavesUsed(user?.id || user?.email)} guardados con IA de ${MAX_NON_ADMIN_AI_SAVES} permitidos`}
+                    >
+                      <Sparkles className="w-2.5 h-2.5" />
+                      <span>
+                        IA: {getAiSavesRemaining(user)} de {MAX_NON_ADMIN_AI_SAVES} restantes
+                      </span>
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           </div>

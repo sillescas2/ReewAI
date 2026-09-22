@@ -26,6 +26,7 @@ export interface AnalyzeCoreParams {
   allowedCategories?: string[] | CategorySpec[];
   categoryObjects?: CategorySpec[];
   userId?: string;
+  apiKey?: string;
 }
 
 export interface AnalyzeCoreResult {
@@ -463,10 +464,12 @@ export async function fetchMediaMetadata(url: string, platform: PlatformType): P
 }
 
 let genAiInstance: GoogleGenAI | null = null;
-function getGenAI(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!genAiInstance) {
+let currentGenAiKey: string | null = null;
+
+function getGenAI(customKey?: string): GoogleGenAI | null {
+  const apiKey = (customKey || '').trim() || process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey.length < 5) return null;
+  if (!genAiInstance || currentGenAiKey !== apiKey) {
     genAiInstance = new GoogleGenAI({
       apiKey,
       httpOptions: {
@@ -475,6 +478,7 @@ function getGenAI(): GoogleGenAI | null {
         },
       },
     });
+    currentGenAiKey = apiKey;
   }
   return genAiInstance;
 }
@@ -531,9 +535,9 @@ export async function analyzeLinkCore(params: AnalyzeCoreParams): Promise<Analyz
   const suggestedTitle = (manualTitle?.trim() || meta.title || '').trim();
 
   // 4. Try Gemini AI if API key is present
-  const rawApiKey = process.env.GEMINI_API_KEY;
+  const rawApiKey = (params.apiKey || '').trim() || process.env.GEMINI_API_KEY;
   const geminiKeyMissing = !rawApiKey || rawApiKey.trim().length <= 5;
-  const ai = getGenAI();
+  const ai = getGenAI(rawApiKey);
   let aiResult: any = null;
   let aiProcessed = false;
 
