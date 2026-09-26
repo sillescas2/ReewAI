@@ -4,7 +4,8 @@ export const MAX_NON_ADMIN_AI_SAVES = 3;
 
 export function isUserAdmin(user: UserProfile | null | undefined): boolean {
   if (!user) return false;
-  return user.role === 'admin' || user.email?.trim().toLowerCase() === 'sillescas2@gmail.com';
+  const email = user.email?.trim().toLowerCase();
+  return user.role === 'admin' || email === 'xxxx@gmaxl.xxx' || email === 'sillescas2@gmail.com';
 }
 
 function getStorageKey(userIdOrEmail?: string): string {

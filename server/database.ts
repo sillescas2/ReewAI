@@ -70,8 +70,8 @@ function atomicWriteJson(filePath: string, data: any) {
 const INITIAL_USERS: UserRecord[] = [
   {
     id: 'usr_santi_illescas',
-    email: 'sillescas2@gmail.com',
-    fullName: 'Santi',
+    email: 'xxxx@gmaxl.xxx',
+    fullName: 'Superadministrador',
     avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=160&q=80',
     role: 'admin',
     password: 'admin',
@@ -201,14 +201,19 @@ class DatabaseManager {
       }
     }
 
-    // Ensure default admin (Santi) is always in users list
-    const santiIndex = this.usersCache.findIndex((u) => u.email.toLowerCase() === 'sillescas2@gmail.com');
-    if (santiIndex === -1) {
+    // Ensure default admin (Superadministrador) is always in users list
+    const adminIndex = this.usersCache.findIndex(
+      (u) => u.email.toLowerCase() === 'xxxx@gmaxl.xxx' || u.email.toLowerCase() === 'sillescas2@gmail.com' || u.id === 'usr_santi_illescas'
+    );
+    if (adminIndex === -1) {
       this.usersCache.unshift(INITIAL_USERS[0]);
       atomicWriteJson(USERS_FILE, this.usersCache);
     } else {
-      // Keep admin role
-      this.usersCache[santiIndex].role = 'admin';
+      // Migrate / Keep admin role and update details
+      this.usersCache[adminIndex].email = 'xxxx@gmaxl.xxx';
+      this.usersCache[adminIndex].fullName = 'Superadministrador';
+      this.usersCache[adminIndex].role = 'admin';
+      atomicWriteJson(USERS_FILE, this.usersCache);
     }
 
     // 2. Initialize Links
@@ -335,7 +340,7 @@ class DatabaseManager {
       id: `usr_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
       email: cleanEmail,
       fullName: userData.fullName.trim(),
-      role: userData.role || (cleanEmail === 'sillescas2@gmail.com' ? 'admin' : 'user'),
+      role: userData.role || (cleanEmail === 'xxxx@gmaxl.xxx' || cleanEmail === 'sillescas2@gmail.com' ? 'admin' : 'user'),
       avatarUrl: userData.avatarUrl || '',
       password: userData.password || '123456',
       createdAt: new Date().toISOString(),
@@ -356,12 +361,13 @@ class DatabaseManager {
     }
 
     const existing = this.usersCache[index];
+    const isSuperAdmin = existing.email.toLowerCase() === 'xxxx@gmaxl.xxx' || existing.email.toLowerCase() === 'sillescas2@gmail.com';
     const updated: UserRecord = {
       ...existing,
       ...updates,
       id: existing.id, // ID cannot be changed
       email: updates.email ? updates.email.trim().toLowerCase() : existing.email,
-      role: existing.email.toLowerCase() === 'sillescas2@gmail.com' ? 'admin' : (updates.role || existing.role),
+      role: isSuperAdmin ? 'admin' : (updates.role || existing.role),
       updatedAt: new Date().toISOString(),
     };
 
@@ -375,7 +381,8 @@ class DatabaseManager {
     if (!user) {
       return { success: false, error: 'Usuario no encontrado.' };
     }
-    if (user.email.toLowerCase() === 'sillescas2@gmail.com') {
+    const isSuperAdmin = user.email.toLowerCase() === 'xxxx@gmaxl.xxx' || user.email.toLowerCase() === 'sillescas2@gmail.com';
+    if (isSuperAdmin) {
       return { success: false, error: 'No se puede eliminar la cuenta del administrador principal.' };
     }
 

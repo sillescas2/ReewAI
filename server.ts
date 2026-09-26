@@ -843,7 +843,7 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
     email,
     fullName,
     password: password || '123456',
-    role: email.toLowerCase() === 'sillescas2@gmail.com' ? 'admin' : 'user',
+    role: (email.toLowerCase() === 'xxxx@gmaxl.xxx' || email.toLowerCase() === 'sillescas2@gmail.com') ? 'admin' : 'user',
   });
 
   if (!result.success) {

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "usr_santi_illescas",
+    "email": "xxxx@gmaxl.xxx",
+    "fullName": "Superadministrador",
+    "avatarUrl": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=160&q=80",
+    "role": "admin",
+    "password": "admin",
+    "createdAt": "2025-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "usr_prueba",
+    "email": "prueba@reewai.app",
+    "fullName": "Usuario de prueba",
+    "avatarUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=160&q=80",
+    "role": "editor",
+    "password": "prueba",
+    "createdAt": "2025-01-01T00:00:00.000Z"
+  }
+]

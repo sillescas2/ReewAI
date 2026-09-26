@@ -19,14 +19,20 @@ export interface DemoTeamMember {
   password?: string;
 }
 
+export const isSuperAdminEmail = (email?: string | null): boolean => {
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  return clean === 'xxxx@gmaxl.xxx' || clean === 'sillescas2@gmail.com';
+};
+
 export const DEMO_TEAM_MEMBERS: DemoTeamMember[] = [
   {
     id: 'usr_santi_illescas',
-    email: 'sillescas2@gmail.com',
-    fullName: 'Santi',
+    email: 'xxxx@gmaxl.xxx',
+    fullName: 'Superadministrador',
     avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=160&q=80',
     role: 'admin',
-    jobTitle: 'Administrador Principal',
+    jobTitle: 'Superadministrador',
     password: 'admin',
   },
   {
@@ -237,7 +243,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
 
-        // Active cleanup: Purge Carlos and Sofia, and migrate Elena to "Usuario de prueba"
+        // Active cleanup: Purge Carlos/Sofia, migrate Elena to "Usuario de prueba", migrate Santi to "Superadministrador"
         currentUsers = currentUsers
           .filter((cu) => {
             const id = (cu.id || '').toLowerCase();
@@ -247,6 +253,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return true;
           })
           .map((cu) => {
+            if (
+              cu.id === 'usr_santi_illescas' ||
+              isSuperAdminEmail(cu.email) ||
+              (cu.fullName && cu.fullName.toLowerCase() === 'santi')
+            ) {
+              return {
+                ...cu,
+                id: 'usr_santi_illescas',
+                email: 'xxxx@gmaxl.xxx',
+                fullName: 'Superadministrador',
+                role: 'admin',
+                password: 'admin',
+              };
+            }
             if (
               cu.id === 'usr_elena_vega' ||
               (cu.fullName && cu.fullName.toLowerCase().includes('elena vega')) ||
@@ -288,9 +308,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // 2. Server database users
         serverUsers.forEach((su) => {
-          combinedUsersMap.set(su.email.toLowerCase(), {
+          const isSuper = isSuperAdminEmail(su.email) || su.id === 'usr_santi_illescas';
+          combinedUsersMap.set(isSuper ? 'xxxx@gmaxl.xxx' : su.email.toLowerCase(), {
             ...su,
-            role: su.email.toLowerCase() === 'sillescas2@gmail.com' ? 'admin' : (su.role || 'user'),
+            email: isSuper ? 'xxxx@gmaxl.xxx' : su.email,
+            fullName: isSuper ? 'Superadministrador' : su.fullName,
+            role: isSuper ? 'admin' : (su.role || 'user'),
           });
         });
 
@@ -302,8 +325,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
 
         const allUsers: UserProfile[] = Array.from(combinedUsersMap.values()).map((u) => {
-          if (u.email.toLowerCase() === 'sillescas2@gmail.com') {
-            return { ...u, role: 'admin' as const, password: u.password || 'admin' };
+          if (isSuperAdminEmail(u.email) || u.id === 'usr_santi_illescas') {
+            return {
+              ...u,
+              email: 'xxxx@gmaxl.xxx',
+              fullName: 'Superadministrador',
+              role: 'admin' as const,
+              password: u.password || 'admin',
+            };
           }
           return u;
         });
@@ -318,8 +347,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const activeUserId = localStorage.getItem(LOCAL_ACTIVE_USER_KEY);
         let found = activeUserId ? allUsers.find((u) => u.id === activeUserId) || null : null;
         if (found) {
-          if (found.email.toLowerCase() === 'sillescas2@gmail.com') {
-            found = { ...found, role: 'admin' };
+          if (isSuperAdminEmail(found.email) || found.id === 'usr_santi_illescas') {
+            found = {
+              ...found,
+              email: 'xxxx@gmaxl.xxx',
+              fullName: 'Superadministrador',
+              role: 'admin',
+            };
           }
         }
         setUser(found);
@@ -378,7 +412,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           email: data.user.email || '',
           fullName: data.user.user_metadata?.full_name || email.split('@')[0],
           avatarUrl: data.user.user_metadata?.avatar_url || '',
-          role: (data.user.email?.toLowerCase() === 'sillescas2@gmail.com') ? 'admin' : 'user',
+          role: isSuperAdminEmail(data.user.email) ? 'admin' : 'user',
         });
       }
       return { success: true };
@@ -390,7 +424,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         recordSuccessfulLogin(cleanEmail);
         const loggedUser: UserProfile = {
           ...serverLogin.user,
-          role: cleanEmail === 'sillescas2@gmail.com' ? 'admin' : serverLogin.user.role,
+          role: isSuperAdminEmail(cleanEmail) ? 'admin' : serverLogin.user.role,
         };
         setUser(loggedUser);
         localStorage.setItem(LOCAL_ACTIVE_USER_KEY, loggedUser.id);
@@ -462,7 +496,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           id: data.user.id,
           email: data.user.email || '',
           fullName: fullName || email.split('@')[0],
-          role: (data.user.email?.toLowerCase() === 'sillescas2@gmail.com') ? 'admin' : 'user',
+          role: isSuperAdminEmail(data.user.email) ? 'admin' : 'user',
         });
       }
       return { success: true };
@@ -477,7 +511,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         id: `usr_${Date.now()}`,
         email: cleanEmail,
         fullName: fullName?.trim() || cleanEmail.split('@')[0],
-        role: cleanEmail === 'sillescas2@gmail.com' ? 'admin' : 'user',
+        role: isSuperAdminEmail(cleanEmail) ? 'admin' : 'user',
         password: password?.trim() || '',
         createdAt: new Date().toISOString(),
       };
@@ -922,6 +956,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return true;
       })
       .map((cu) => {
+        if (
+          cu.id === 'usr_santi_illescas' ||
+          isSuperAdminEmail(cu.email) ||
+          (cu.fullName && cu.fullName.toLowerCase() === 'santi')
+        ) {
+          return {
+            ...cu,
+            id: 'usr_santi_illescas',
+            email: 'xxxx@gmaxl.xxx',
+            fullName: 'Superadministrador',
+            role: 'admin',
+            password: 'admin',
+          };
+        }
         if (
           cu.id === 'usr_elena_vega' ||
           (cu.fullName && cu.fullName.toLowerCase().includes('elena vega')) ||

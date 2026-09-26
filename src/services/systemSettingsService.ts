@@ -74,7 +74,8 @@ let inMemoryCachedKey: string | null = null;
 
 export function isUserAdmin(user: UserProfile | null | undefined): boolean {
   if (!user) return false;
-  return user.role === 'admin' || user.email?.trim().toLowerCase() === 'sillescas2@gmail.com';
+  const email = user.email?.trim().toLowerCase();
+  return user.role === 'admin' || email === 'xxxx@gmaxl.xxx' || email === 'sillescas2@gmail.com';
 }
 
 export function maskApiKey(key: string | null | undefined): string {
