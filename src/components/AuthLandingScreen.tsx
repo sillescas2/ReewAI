@@ -28,7 +28,7 @@ interface AuthLandingScreenProps {
 }
 
 export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
-  const { login, register, switchUser, requestPasswordReset, resetPasswordWithCode } = useAuth();
+  const { login, register, switchUser, requestPasswordReset, resetPasswordWithCode, isSupabase } = useAuth();
 
   const [mode, setMode] = useState<'login' | 'register' | 'forgot' | 'reset-code'>('login');
   const [email, setEmail] = useState('');
@@ -148,13 +148,14 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
       setRecoveryCode('');
       setNewPassword('');
       setConfirmNewPassword('');
-      setMode('reset-code');
 
       if (res.isSupabase) {
+        // En modo Supabase, el flujo es directo por enlace. No se requiere código numérico.
         setSuccessMessage(
-          `Hemos enviado el correo oficial de Supabase a "${cleanEmail}". Abre tu correo y pulsa en "Restablecer contraseña". No necesitas buscar ningún código numérico.`
+          `¡Correo enviado! Hemos enviado un enlace a "${cleanEmail}". Abre tu correo y pulsa directamente en "Reset password". Se abrirá automáticamente la pantalla para elegir tu nueva contraseña sin necesidad de código.`
         );
       } else {
+        setMode('reset-code');
         setSuccessMessage(
           res.message ||
             `Hemos enviado un código de verificación de 6 dígitos a "${cleanEmail}". Por favor, abre tu correo, copia el código y pégalo a continuación.`
@@ -367,18 +368,20 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
                   )}
                 </button>
 
-                <div className="text-center pt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode('reset-code');
-                      setErrorMessage(null);
-                    }}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium hover:underline cursor-pointer"
-                  >
-                    ¿Ya tienes un código o quieres introducirlo? Haz clic aquí →
-                  </button>
-                </div>
+                {!isSupabase && (
+                  <div className="text-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode('reset-code');
+                        setErrorMessage(null);
+                      }}
+                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium hover:underline cursor-pointer"
+                    >
+                      ¿Ya tienes un código o quieres introducirlo? Haz clic aquí →
+                    </button>
+                  </div>
+                )}
               </form>
             )}
 

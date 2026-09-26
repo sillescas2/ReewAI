@@ -47,6 +47,7 @@ export const getSupabaseClient = (): SupabaseClient | null => {
           persistSession: true,
           autoRefreshToken: true,
           detectSessionInUrl: true,
+          flowType: 'implicit',
         },
       });
       currentClientKey = clientKey;

@@ -188,13 +188,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setRecoveryCode('');
       setNewPassword('');
       setConfirmNewPassword('');
-      setTab('reset-code');
 
       if (res.isSupabase) {
         setSuccessMessage(
-          `Hemos enviado el correo oficial a "${targetEmail}". Abre tu correo y pulsa directamente en "Restablecer contraseña". No necesitas ningún código numérico.`
+          `¡Correo enviado! Hemos enviado un enlace a "${targetEmail}". Abre tu correo y pulsa directamente en "Reset password". Se abrirá automáticamente la pantalla para definir tu nueva clave sin necesidad de ningún código.`
         );
       } else {
+        setTab('reset-code');
         setSuccessMessage(
           res.message ||
             `Hemos enviado un código de verificación a "${targetEmail}". Abre tu correo, copia el código de 6 dígitos y pégalo aquí.`

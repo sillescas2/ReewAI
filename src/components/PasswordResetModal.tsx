@@ -288,47 +288,48 @@ export const PasswordResetModal: React.FC = () => {
                   <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                   <span>El enlace anterior ha caducado o ya fue utilizado</span>
                 </div>
-                <p className="text-[11px] text-amber-900/90 leading-relaxed">
-                  Por seguridad, los enlaces de Supabase son de <strong>un solo uso</strong>. Si has solicitado
-                  recuperar la contraseña más de una vez, <strong>solo el enlace del último correo recibido es válido</strong> (los anteriores quedan cancelados).
+                <p className="text-[11.5px] text-amber-900/90 leading-relaxed">
+                  Por seguridad, los enlaces de recuperación son de <strong>un solo uso</strong>. Si has solicitado recuperar la clave más de una vez, solo el enlace del último correo recibido es válido.
                 </p>
               </div>
 
-              {/* Sub-mode selector tabs */}
-              <div className="flex rounded-xl bg-neutral-100 p-1 text-xs">
-                <button
-                  type="button"
-                  id="tab-request-link"
-                  onClick={() => {
-                    setActiveTab('link');
-                    setFormError(null);
-                  }}
-                  className={`flex-1 py-1.5 px-3 rounded-lg font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                    activeTab === 'link'
-                      ? 'bg-white text-neutral-900 shadow-xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  <Mail className="w-3.5 h-3.5" />
-                  <span>Solicitar nuevo enlace</span>
-                </button>
-                <button
-                  type="button"
-                  id="tab-enter-code"
-                  onClick={() => {
-                    setActiveTab('code');
-                    setFormError(null);
-                  }}
-                  className={`flex-1 py-1.5 px-3 rounded-lg font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                    activeTab === 'code'
-                      ? 'bg-white text-neutral-900 shadow-xs'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                >
-                  <KeyRound className="w-3.5 h-3.5" />
-                  <span>Tengo código de 6 dígitos</span>
-                </button>
-              </div>
+              {/* Sub-mode selector tabs: only shown in non-Supabase mode */}
+              {!isSupabase && (
+                <div className="flex rounded-xl bg-neutral-100 p-1 text-xs">
+                  <button
+                    type="button"
+                    id="tab-request-link"
+                    onClick={() => {
+                      setActiveTab('link');
+                      setFormError(null);
+                    }}
+                    className={`flex-1 py-1.5 px-3 rounded-lg font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      activeTab === 'link'
+                        ? 'bg-white text-neutral-900 shadow-xs'
+                        : 'text-neutral-600 hover:text-neutral-900'
+                    }`}
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Solicitar nuevo enlace</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="tab-enter-code"
+                    onClick={() => {
+                      setActiveTab('code');
+                      setFormError(null);
+                    }}
+                    className={`flex-1 py-1.5 px-3 rounded-lg font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      activeTab === 'code'
+                        ? 'bg-white text-neutral-900 shadow-xs'
+                        : 'text-neutral-600 hover:text-neutral-900'
+                    }`}
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Tengo código de 6 dígitos</span>
+                  </button>
+                </div>
+              )}
 
               {formError && (
                 <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2 text-xs text-rose-800 animate-fade-in">
@@ -384,6 +385,11 @@ export const PasswordResetModal: React.FC = () => {
                         </div>
                       </div>
 
+                      <div className="p-2.5 bg-neutral-50 border border-neutral-200/90 rounded-xl text-[11px] text-neutral-600 space-y-1 leading-relaxed">
+                        <p className="font-semibold text-neutral-800">💡 Para evitar que vuelva a caducar en móvil:</p>
+                        <p>Abre <strong>únicamente el último correo recibido</strong>. Si tu gestor de correo pre-analiza los enlaces, mantén pulsado el botón en el correo, dale a "Copiar enlace" y pégalo en la barra de tu navegador.</p>
+                      </div>
+
                       <div className="flex gap-2 pt-1">
                         <button
                           type="button"
@@ -435,6 +441,13 @@ export const PasswordResetModal: React.FC = () => {
                     </div>
                   ) : (
                     <form onSubmit={handleResetWithCode} className="space-y-3">
+                      <div className="p-2.5 bg-indigo-50/90 border border-indigo-200/80 rounded-xl text-[11px] text-indigo-950 space-y-1 leading-relaxed">
+                        <p className="font-semibold text-indigo-900">ℹ️ ¿Cómo activar el código de 6 dígitos en tu correo?</p>
+                        <p>
+                          Por defecto Supabase solo envía el enlace directo. Para recibir el código de 6 dígitos numéricos en tus correos, ve a tu panel de Supabase: <strong>Authentication ➔ Email Templates ➔ Reset Password</strong> y añade la variable <code>{'{{ .Token }}'}</code>.
+                        </p>
+                      </div>
+
                       <div>
                         <label className="block text-xs font-medium text-neutral-700 mb-1">
                           Correo Electrónico
