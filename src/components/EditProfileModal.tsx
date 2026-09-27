@@ -9,7 +9,15 @@ import {
   Sparkles,
   Save,
   AlertCircle,
-  Database
+  Database,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Copy,
+  Download,
+  RefreshCw,
+  ShieldCheck,
+  CheckCircle2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { APP_VERSION } from '../constants/version';
@@ -29,7 +37,7 @@ const PRESET_AVATARS = [
 ];
 
 export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onClose }) => {
-  const { user, updateProfile, isSupabase } = useAuth();
+  const { user, updateProfile, regenerateRecoveryKey, isSupabase } = useAuth();
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -41,7 +49,74 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
+  // Recovery Key card states
+  const [showRecoveryKey, setShowRecoveryKey] = useState(false);
+  const [copiedRecoveryKey, setCopiedRecoveryKey] = useState(false);
+  const [isRegeneratingKey, setIsRegeneratingKey] = useState(false);
+  const [regenerateSuccess, setRegenerateSuccess] = useState('');
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const activeKey = user?.recoveryKey || 'RW88-9999';
+
+  const handleCopyRecoveryKey = () => {
+    navigator.clipboard.writeText(activeKey);
+    setCopiedRecoveryKey(true);
+    setTimeout(() => setCopiedRecoveryKey(false), 2500);
+  };
+
+  const handleDownloadTxt = () => {
+    const textContent = `=====================================================
+REEWAI - CLAVE SECRETA DE RESCATE PERSONAL
+=====================================================
+
+Usuario: ${user?.fullName || 'Usuario'}
+Correo de la cuenta: ${user?.email || email}
+Clave de Rescate (8 caracteres): ${activeKey}
+Fecha: ${new Date().toLocaleString()}
+Versión: ${APP_VERSION}
+
+INSTRUCCIONES DE USO:
+1. Guarda este archivo en un lugar seguro (por ejemplo en tus notas, 
+   gestor de contraseñas o en una carpeta privada).
+2. Si alguna vez olvidas tu contraseña o los enlaces del correo electrónico 
+   caducan por el antivirus, pulsa en "¿Olvidaste tu contraseña? Usar Clave de Rescate".
+3. Introduce tu correo y esta clave de 8 caracteres.
+4. Podrás cambiar tu contraseña al instante sin depender de correos electrónicos.
+=====================================================`;
+
+    const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Clave-Rescate-ReewAI-${(user?.email || email).split('@')[0]}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleRegenerateKey = async () => {
+    if (!window.confirm('¿Seguro que deseas regenerar tu Clave de Rescate? La clave anterior quedará invalidada inmediatamente.')) {
+      return;
+    }
+
+    setIsRegeneratingKey(true);
+    setRegenerateSuccess('');
+    try {
+      const res = await regenerateRecoveryKey();
+      if (res.success && res.recoveryKey) {
+        setRegenerateSuccess(`¡Nueva Clave generada: ${res.recoveryKey}! Cópiala o descárgala.`);
+        setShowRecoveryKey(true);
+      } else {
+        setErrorMessage(res.error || 'No se pudo regenerar la clave.');
+      }
+    } catch (e: any) {
+      setErrorMessage(e.message || 'Error al regenerar la clave.');
+    } finally {
+      setIsRegeneratingKey(false);
+    }
+  };
 
   useEffect(() => {
     if (user && isOpen) {
@@ -385,6 +460,88 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({ isOpen, onCl
             <p className="text-[11px] text-neutral-500">
               Se utilizará para tus inicios de sesión y asociación de enlaces en base de datos.
             </p>
+          </div>
+
+          {/* Clave Secreta de Rescate (Master Recovery Key) */}
+          <div className="p-4 bg-linear-to-br from-indigo-50/70 via-purple-50/50 to-white rounded-2xl border border-indigo-200/90 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                  <KeyRound className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-neutral-900 leading-tight">Clave Secreta de Rescate</h4>
+                  <p className="text-[10px] text-neutral-500">Llave de 8 caracteres para emergencias</p>
+                </div>
+              </div>
+              <span className="text-[10px] font-mono font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200">
+                Personal
+              </span>
+            </div>
+
+            <p className="text-[11px] text-neutral-600 leading-relaxed">
+              Si alguna vez olvidas tu contraseña o tus enlaces de correo no funcionan, usa este código para recuperar tu acceso en 5 segundos sin depender de emails.
+            </p>
+
+            {regenerateSuccess && (
+              <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] flex items-center gap-1.5 font-medium animate-fade-in">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>{regenerateSuccess}</span>
+              </div>
+            )}
+
+            {/* Key display with Eye / Copy / Download / Regenerate */}
+            <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+              <div className="w-full sm:flex-1 flex items-center justify-between px-3 py-2 bg-white rounded-xl border border-neutral-300 font-mono text-xs">
+                <span className="font-bold tracking-widest text-indigo-950">
+                  {showRecoveryKey ? activeKey : '••••-••••'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowRecoveryKey(!showRecoveryKey)}
+                  className="text-neutral-400 hover:text-neutral-700 p-1 cursor-pointer transition-colors"
+                  title={showRecoveryKey ? 'Ocultar clave' : 'Mostrar clave'}
+                >
+                  {showRecoveryKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={handleCopyRecoveryKey}
+                  className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                    copiedRecoveryKey
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-white hover:bg-neutral-50 text-neutral-700 border border-neutral-300 shadow-2xs'
+                  }`}
+                  title="Copiar al portapapeles"
+                >
+                  {copiedRecoveryKey ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedRecoveryKey ? '¡Copiada!' : 'Copiar'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadTxt}
+                  className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-white hover:bg-neutral-50 text-neutral-700 border border-neutral-300 shadow-2xs transition-all cursor-pointer"
+                  title="Descargar archivo de texto .txt"
+                >
+                  <Download className="w-3.5 h-3.5 text-neutral-500" />
+                  <span>Descargar .txt</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isRegeneratingKey}
+                  onClick={handleRegenerateKey}
+                  className="p-2 text-neutral-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors cursor-pointer border border-transparent hover:border-indigo-100"
+                  title="Regenerar nueva clave"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRegeneratingKey ? 'animate-spin text-indigo-600' : ''}`} />
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Role badge display */}

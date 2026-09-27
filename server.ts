@@ -828,13 +828,14 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
       role: user.role,
       avatarUrl: user.avatarUrl,
       createdAt: user.createdAt,
+      recoveryKey: user.recoveryKey,
     },
   });
 });
 
 // Register endpoint
 app.post('/api/auth/register', (req: Request, res: Response) => {
-  const { email, password, fullName } = req.body;
+  const { email, password, fullName, recoveryKey } = req.body;
   if (!email || !fullName) {
     return res.status(400).json({ success: false, error: 'Email y nombre son obligatorios.' });
   }
@@ -844,6 +845,7 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
     fullName,
     password: password || '123456',
     role: (email.toLowerCase() === 'xxxx@gmaxl.xxx' || email.toLowerCase() === 'sillescas2@gmail.com') ? 'admin' : 'user',
+    recoveryKey,
   });
 
   if (!result.success) {
@@ -859,6 +861,7 @@ app.post('/api/auth/register', (req: Request, res: Response) => {
       role: result.user?.role,
       avatarUrl: result.user?.avatarUrl,
       createdAt: result.user?.createdAt,
+      recoveryKey: result.user?.recoveryKey,
     },
   });
 });
@@ -911,6 +914,61 @@ app.post('/api/auth/reset-password', (req: Request, res: Response) => {
   res.json({
     success: true,
     message: '¡Contraseña actualizada con éxito! Ya puedes iniciar sesión con tu nueva contraseña.',
+  });
+});
+
+// Reset password using 8-character Master Recovery Key (bypasses email servers)
+app.post('/api/auth/reset-with-recovery-key', (req: Request, res: Response) => {
+  const { email, recoveryKey, newPassword } = req.body;
+  if (!email || !recoveryKey || !newPassword) {
+    return res.status(400).json({
+      success: false,
+      error: 'Todos los campos son obligatorios (correo, clave de rescate y nueva contraseña).',
+    });
+  }
+
+  const result = db.resetPasswordWithRecoveryKey(email, recoveryKey, newPassword);
+  if (!result.success) {
+    return res.status(400).json({
+      success: false,
+      error: result.error || 'No se pudo restablecer la contraseña con la clave de rescate.',
+    });
+  }
+
+  // Clear any failed attempts lockout
+  serverLoginAttempts.delete(email.trim().toLowerCase());
+
+  res.json({
+    success: true,
+    message: '¡Contraseña restablecida con éxito con tu Clave de Rescate!',
+    newRecoveryKey: result.newRecoveryKey,
+    user: result.user ? {
+      id: result.user.id,
+      email: result.user.email,
+      fullName: result.user.fullName,
+      role: result.user.role,
+      avatarUrl: result.user.avatarUrl,
+      recoveryKey: result.newRecoveryKey,
+    } : undefined,
+  });
+});
+
+// Regenerate Recovery Key for logged user
+app.post('/api/auth/regenerate-recovery-key', (req: Request, res: Response) => {
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ success: false, error: 'userId es requerido.' });
+  }
+
+  const result = db.regenerateRecoveryKey(userId);
+  if (!result.success) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+
+  res.json({
+    success: true,
+    recoveryKey: result.recoveryKey,
+    message: 'Nueva clave de rescate generada con éxito.',
   });
 });
 

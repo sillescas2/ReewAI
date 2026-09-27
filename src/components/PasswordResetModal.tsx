@@ -25,11 +25,12 @@ export const PasswordResetModal: React.FC = () => {
     updatePasswordDirectly,
     requestPasswordReset,
     resetPasswordWithCode,
+    resetPasswordWithRecoveryKey,
     isSupabase,
   } = useAuth();
 
-  // Active recovery sub-mode when link is expired
-  const [activeTab, setActiveTab] = useState<'link' | 'code'>('link');
+  // Active recovery sub-mode when link is expired: default to recovery-key for instant bypass
+  const [activeTab, setActiveTab] = useState<'recovery-key' | 'link' | 'code'>('recovery-key');
 
   // Form states for setting new password directly (active recovery session)
   const [newPassword, setNewPassword] = useState('');
@@ -39,6 +40,17 @@ export const PasswordResetModal: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // States for 8-character recovery key tab
+  const [recoveryKeyEmail, setRecoveryKeyEmail] = useState(
+    recoveryFlow.email ||
+      (typeof window !== 'undefined' ? localStorage.getItem('reewai_last_recovery_email') || '' : '')
+  );
+  const [recoveryKeyInput, setRecoveryKeyInput] = useState('');
+  const [recoveryKeyNewPassword, setRecoveryKeyNewPassword] = useState('');
+  const [recoveryKeyConfirmPassword, setRecoveryKeyConfirmPassword] = useState('');
+  const [showRecoveryKeyPassword, setShowRecoveryKeyPassword] = useState(false);
+  const [isSubmittingRecoveryKey, setIsSubmittingRecoveryKey] = useState(false);
 
   // States for re-requesting link when expired
   const [resendEmail, setResendEmail] = useState(
@@ -63,11 +75,13 @@ export const PasswordResetModal: React.FC = () => {
   // Sync emails if recoveryFlow changes
   useEffect(() => {
     if (recoveryFlow.email) {
+      setRecoveryKeyEmail(recoveryFlow.email);
       setResendEmail(recoveryFlow.email);
       setCodeEmail(recoveryFlow.email);
     } else if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('reewai_last_recovery_email');
       if (saved) {
+        setRecoveryKeyEmail(saved);
         setResendEmail(saved);
         setCodeEmail(saved);
       }
@@ -226,6 +240,54 @@ export const PasswordResetModal: React.FC = () => {
     }
   };
 
+  const handleResetWithRecoveryKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+    setSuccessMessage(null);
+
+    const email = recoveryKeyEmail.trim();
+    const key = recoveryKeyInput.trim();
+    const pwd = recoveryKeyNewPassword.trim();
+
+    if (!email || !email.includes('@')) {
+      setFormError('Por favor, introduce una dirección de correo válida.');
+      return;
+    }
+
+    if (!key || key.length < 4) {
+      setFormError('Introduce tu Clave de Rescate de 8 caracteres (ej. RW88-9999 o 8 dígitos).');
+      return;
+    }
+
+    if (!pwd || pwd.length < 6) {
+      setFormError('La nueva contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+
+    if (pwd !== recoveryKeyConfirmPassword.trim()) {
+      setFormError('Las dos contraseñas no coinciden. Asegúrate de que sean idénticas.');
+      return;
+    }
+
+    setIsSubmittingRecoveryKey(true);
+    try {
+      const res = await resetPasswordWithRecoveryKey(email, key, pwd);
+      if (!res.success) {
+        setFormError(res.error || 'La clave de rescate no coincide o es incorrecta.');
+        return;
+      }
+
+      setSuccessMessage(res.message || '¡Contraseña restablecida con éxito! Accediendo a tu cuenta...');
+      setTimeout(() => {
+        closeRecoveryFlow();
+      }, 2000);
+    } catch (err: any) {
+      setFormError(err.message || 'Error al restablecer con la clave de rescate.');
+    } finally {
+      setIsSubmittingRecoveryKey(false);
+    }
+  };
+
   return (
     <div
       id="password-reset-modal-backdrop"
@@ -293,49 +355,215 @@ export const PasswordResetModal: React.FC = () => {
                 </p>
               </div>
 
-              {/* Sub-mode selector tabs: only shown in non-Supabase mode */}
-              {!isSupabase && (
-                <div className="flex rounded-xl bg-neutral-100 p-1 text-xs">
-                  <button
-                    type="button"
-                    id="tab-request-link"
-                    onClick={() => {
-                      setActiveTab('link');
-                      setFormError(null);
-                    }}
-                    className={`flex-1 py-1.5 px-3 rounded-lg font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                      activeTab === 'link'
-                        ? 'bg-white text-neutral-900 shadow-xs'
-                        : 'text-neutral-600 hover:text-neutral-900'
-                    }`}
-                  >
-                    <Mail className="w-3.5 h-3.5" />
-                    <span>Solicitar nuevo enlace</span>
-                  </button>
-                  <button
-                    type="button"
-                    id="tab-enter-code"
-                    onClick={() => {
-                      setActiveTab('code');
-                      setFormError(null);
-                    }}
-                    className={`flex-1 py-1.5 px-3 rounded-lg font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                      activeTab === 'code'
-                        ? 'bg-white text-neutral-900 shadow-xs'
-                        : 'text-neutral-600 hover:text-neutral-900'
-                    }`}
-                  >
-                    <KeyRound className="w-3.5 h-3.5" />
-                    <span>Tengo código de 6 dígitos</span>
-                  </button>
-                </div>
-              )}
+              {/* Sub-mode selector tabs: Clave de Rescate (Instantánea) vs Enlace vs Código */}
+              <div className="flex rounded-xl bg-neutral-100 p-1 text-xs gap-1">
+                <button
+                  type="button"
+                  id="tab-recovery-key"
+                  onClick={() => {
+                    setActiveTab('recovery-key');
+                    setFormError(null);
+                  }}
+                  className={`flex-1 py-1.5 px-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
+                    activeTab === 'recovery-key'
+                      ? 'bg-indigo-600 text-white shadow-xs font-semibold'
+                      : 'text-neutral-700 hover:text-neutral-900 hover:bg-neutral-200/60'
+                  }`}
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>Clave de Rescate (8 dígitos)</span>
+                </button>
+                <button
+                  type="button"
+                  id="tab-request-link"
+                  onClick={() => {
+                    setActiveTab('link');
+                    setFormError(null);
+                  }}
+                  className={`flex-1 py-1.5 px-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
+                    activeTab === 'link'
+                      ? 'bg-white text-neutral-900 shadow-xs font-semibold'
+                      : 'text-neutral-700 hover:text-neutral-900 hover:bg-neutral-200/60'
+                  }`}
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  <span>Reenviar enlace</span>
+                </button>
+                <button
+                  type="button"
+                  id="tab-enter-code"
+                  onClick={() => {
+                    setActiveTab('code');
+                    setFormError(null);
+                  }}
+                  className={`flex-1 py-1.5 px-2.5 rounded-lg font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
+                    activeTab === 'code'
+                      ? 'bg-white text-neutral-900 shadow-xs font-semibold'
+                      : 'text-neutral-700 hover:text-neutral-900 hover:bg-neutral-200/60'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Código 6 dígitos</span>
+                </button>
+              </div>
 
               {formError && (
                 <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2 text-xs text-rose-800 animate-fade-in">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                   <span>{formError}</span>
                 </div>
+              )}
+
+              {/* TAB 0: Instant Reset via 8-character Master Recovery Key */}
+              {activeTab === 'recovery-key' && (
+                <>
+                  {successMessage ? (
+                    <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-900 space-y-2.5 text-center animate-fade-in">
+                      <div className="inline-flex p-2.5 bg-emerald-100 text-emerald-700 rounded-full mb-1">
+                        <Check className="w-6 h-6" />
+                      </div>
+                      <h4 className="text-sm font-bold text-emerald-950">¡Contraseña Restablecida con Éxito!</h4>
+                      <p className="text-[11.5px] text-emerald-800 leading-relaxed">
+                        {successMessage}
+                      </p>
+                      <p className="text-[11px] text-emerald-700 font-medium">
+                        Cerrando ventana y accediendo a tu cuenta...
+                      </p>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleResetWithRecoveryKey} className="space-y-3.5">
+                      <div className="p-3 bg-indigo-50/80 border border-indigo-200/90 rounded-xl text-xs text-indigo-950 space-y-1 leading-relaxed">
+                        <div className="font-semibold flex items-center gap-1.5 text-indigo-900">
+                          <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Restablecimiento Inmediato (Sin correo)</span>
+                        </div>
+                        <p className="text-[11px] text-indigo-900/80">
+                          Introduce tu <strong>Clave de Rescate de 8 caracteres</strong> (la que se te asignó al crear tu cuenta) y escribe tu nueva contraseña. Accederás al instante sin enlaces caducados.
+                        </p>
+                      </div>
+
+                      {/* Email Input */}
+                      <div>
+                        <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                          Tu Correo Electrónico <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="relative">
+                          <Mail className="w-4 h-4 absolute left-3 top-2.5 text-neutral-400" />
+                          <input
+                            type="email"
+                            required
+                            value={recoveryKeyEmail}
+                            onChange={(e) => setRecoveryKeyEmail(e.target.value)}
+                            placeholder="tu@correo.com"
+                            className="w-full pl-9 pr-3 py-2 text-xs border border-neutral-300 rounded-xl focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 outline-hidden bg-white"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Recovery Key Input */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-semibold text-neutral-700">
+                            Clave Secreta de Rescate (8 caracteres) <span className="text-rose-500">*</span>
+                          </label>
+                          <span className="text-[10px] text-neutral-400 font-mono">Ej: RW88-9999</span>
+                        </div>
+                        <div className="relative">
+                          <KeyRound className="w-4 h-4 absolute left-3 top-2.5 text-indigo-500" />
+                          <input
+                            type="text"
+                            required
+                            maxLength={15}
+                            value={recoveryKeyInput}
+                            onChange={(e) => setRecoveryKeyInput(e.target.value.toUpperCase())}
+                            placeholder="XXXX-XXXX"
+                            className="w-full pl-9 pr-3 py-2 text-xs font-mono font-bold tracking-widest text-indigo-950 uppercase border border-indigo-300 rounded-xl focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 outline-hidden bg-indigo-50/30"
+                          />
+                        </div>
+                      </div>
+
+                      {/* New Password */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-semibold text-neutral-700">
+                            Nueva Contraseña <span className="text-rose-500">*</span>
+                          </label>
+                          <span className="text-[10px] text-neutral-400">Mínimo 6 caracteres</span>
+                        </div>
+                        <div className="relative">
+                          <Lock className="w-4 h-4 absolute left-3 top-2.5 text-neutral-400" />
+                          <input
+                            type={showRecoveryKeyPassword ? 'text' : 'password'}
+                            required
+                            minLength={6}
+                            value={recoveryKeyNewPassword}
+                            onChange={(e) => setRecoveryKeyNewPassword(e.target.value)}
+                            placeholder="Escribe tu nueva clave"
+                            className="w-full pl-9 pr-10 py-2 text-xs border border-neutral-300 rounded-xl focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 outline-hidden bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowRecoveryKeyPassword(!showRecoveryKeyPassword)}
+                            className="absolute right-3 top-2 text-neutral-400 hover:text-neutral-700 cursor-pointer"
+                          >
+                            {showRecoveryKeyPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Confirm New Password */}
+                      <div>
+                        <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                          Confirmar Nueva Contraseña <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="relative">
+                          <Lock className="w-4 h-4 absolute left-3 top-2.5 text-neutral-400" />
+                          <input
+                            type={showRecoveryKeyPassword ? 'text' : 'password'}
+                            required
+                            minLength={6}
+                            value={recoveryKeyConfirmPassword}
+                            onChange={(e) => setRecoveryKeyConfirmPassword(e.target.value)}
+                            placeholder="Repite la nueva clave"
+                            className="w-full pl-9 pr-3 py-2 text-xs border border-neutral-300 rounded-xl focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 outline-hidden bg-white"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={closeRecoveryFlow}
+                          className="flex-1 py-2 text-xs font-medium text-neutral-700 bg-neutral-100 hover:bg-neutral-200 rounded-xl transition-colors cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={
+                            isSubmittingRecoveryKey ||
+                            recoveryKeyNewPassword.length < 6 ||
+                            recoveryKeyInput.trim().length < 4
+                          }
+                          className="flex-2 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                        >
+                          {isSubmittingRecoveryKey ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              <span>Restableciendo...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>Restablecer y Entrar</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </>
               )}
 
               {/* TAB 1: Request New Link */}

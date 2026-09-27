@@ -10,6 +10,7 @@ export interface UserRecord {
   password?: string;
   createdAt: string;
   updatedAt?: string;
+  recoveryKey?: string;
 }
 
 export interface LinkRecord {
@@ -66,6 +67,23 @@ function atomicWriteJson(filePath: string, data: any) {
   fs.renameSync(tempPath, filePath);
 }
 
+// Characters excluding confusing glyphs (0, O, 1, I)
+const RECOVERY_KEY_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+
+export function generateRecoveryKeyCode(): string {
+  let part1 = '';
+  let part2 = '';
+  for (let i = 0; i < 4; i++) {
+    part1 += RECOVERY_KEY_CHARS.charAt(Math.floor(Math.random() * RECOVERY_KEY_CHARS.length));
+    part2 += RECOVERY_KEY_CHARS.charAt(Math.floor(Math.random() * RECOVERY_KEY_CHARS.length));
+  }
+  return `${part1}-${part2}`;
+}
+
+export function normalizeRecoveryKey(raw: string): string {
+  return (raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
+
 // Initial default users
 const INITIAL_USERS: UserRecord[] = [
   {
@@ -76,6 +94,7 @@ const INITIAL_USERS: UserRecord[] = [
     role: 'admin',
     password: 'admin',
     createdAt: '2025-01-01T00:00:00.000Z',
+    recoveryKey: 'RW88-9999',
   },
   {
     id: 'usr_prueba',
@@ -85,6 +104,7 @@ const INITIAL_USERS: UserRecord[] = [
     role: 'editor',
     password: 'prueba',
     createdAt: '2025-01-01T00:00:00.000Z',
+    recoveryKey: 'PRUE-2026',
   },
 ];
 
@@ -213,6 +233,21 @@ class DatabaseManager {
       this.usersCache[adminIndex].email = 'xxxx@gmaxl.xxx';
       this.usersCache[adminIndex].fullName = 'Superadministrador';
       this.usersCache[adminIndex].role = 'admin';
+      if (!this.usersCache[adminIndex].recoveryKey) {
+        this.usersCache[adminIndex].recoveryKey = 'RW88-9999';
+      }
+      atomicWriteJson(USERS_FILE, this.usersCache);
+    }
+
+    // Ensure all existing users have a valid recovery key
+    let usersUpdated = false;
+    for (const u of this.usersCache) {
+      if (!u.recoveryKey) {
+        u.recoveryKey = generateRecoveryKeyCode();
+        usersUpdated = true;
+      }
+    }
+    if (usersUpdated) {
       atomicWriteJson(USERS_FILE, this.usersCache);
     }
 
@@ -330,6 +365,7 @@ class DatabaseManager {
     role?: 'admin' | 'user' | 'editor';
     avatarUrl?: string;
     password?: string;
+    recoveryKey?: string;
   }): { success: boolean; user?: UserRecord; error?: string } {
     const cleanEmail = userData.email.trim().toLowerCase();
     if (this.getUserByEmail(cleanEmail)) {
@@ -343,6 +379,7 @@ class DatabaseManager {
       role: userData.role || (cleanEmail === 'xxxx@gmaxl.xxx' || cleanEmail === 'sillescas2@gmail.com' ? 'admin' : 'user'),
       avatarUrl: userData.avatarUrl || '',
       password: userData.password || '123456',
+      recoveryKey: userData.recoveryKey || generateRecoveryKeyCode(),
       createdAt: new Date().toISOString(),
     };
 
@@ -485,6 +522,80 @@ class DatabaseManager {
     // Invalidate code after successful reset
     this.resetCodes.delete(cleanEmail);
     return { success: true };
+  }
+
+  /**
+   * Resets password instantly using the 8-character Master Recovery Key.
+   * Completely bypasses email servers, spam filters, and link expiration.
+   */
+  public resetPasswordWithRecoveryKey(
+    email: string,
+    rawKey: string,
+    newPassword: string
+  ): { success: boolean; newRecoveryKey?: string; user?: UserRecord; error?: string } {
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanKey = normalizeRecoveryKey(rawKey);
+    const cleanPassword = (newPassword || '').trim();
+
+    if (!cleanEmail || !cleanKey || !cleanPassword) {
+      return { success: false, error: 'Correo, clave de rescate y nueva contraseña son obligatorios.' };
+    }
+
+    if (cleanPassword.length < 6) {
+      return { success: false, error: 'La nueva contraseña debe contener al menos 6 caracteres.' };
+    }
+
+    const user = this.getUserByEmail(cleanEmail);
+    if (!user) {
+      return { success: false, error: 'No se encontró ningún usuario registrado con este correo.' };
+    }
+
+    const currentKeyNorm = normalizeRecoveryKey(user.recoveryKey || '');
+    if (!currentKeyNorm || currentKeyNorm !== cleanKey) {
+      return {
+        success: false,
+        error: 'La Clave de Rescate introducida no coincide con la registrada para este correo. Verifica los 8 caracteres.',
+      };
+    }
+
+    // Generate rotated recovery key for extra security
+    const newRecoveryKey = generateRecoveryKeyCode();
+
+    const updateRes = this.updateUser(user.id, {
+      password: cleanPassword,
+      recoveryKey: newRecoveryKey,
+    });
+
+    if (!updateRes.success) {
+      return { success: false, error: updateRes.error || 'Error al actualizar contraseña.' };
+    }
+
+    // Clear any active reset codes
+    this.resetCodes.delete(cleanEmail);
+
+    return {
+      success: true,
+      newRecoveryKey,
+      user: updateRes.user,
+    };
+  }
+
+  /**
+   * Regenerates a new recovery key for a user (e.g. from security settings)
+   */
+  public regenerateRecoveryKey(userId: string): { success: boolean; recoveryKey?: string; error?: string } {
+    const user = this.getUserById(userId);
+    if (!user) {
+      return { success: false, error: 'Usuario no encontrado.' };
+    }
+
+    const newKey = generateRecoveryKeyCode();
+    const updateRes = this.updateUser(userId, { recoveryKey: newKey });
+    if (!updateRes.success) {
+      return { success: false, error: updateRes.error || 'Error al actualizar clave de rescate.' };
+    }
+
+    return { success: true, recoveryKey: newKey };
   }
 
   // ================= LINKS / REELS OPERATIONS (STRICT USER ISOLATION) =================

@@ -19,19 +19,32 @@ import {
   Users,
   Layers,
   ChevronRight,
-  Clock
+  Clock,
+  Download
 } from 'lucide-react';
 import { useAuth, DEMO_TEAM_MEMBERS, DemoTeamMember } from '../context/AuthContext';
 import { APP_VERSION } from '../constants/version';
+import { RecoveryKeyModal } from './RecoveryKeyModal';
 
 interface AuthLandingScreenProps {
   onOpenSupabaseModal?: () => void;
 }
 
 export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
-  const { login, register, switchUser, requestPasswordReset, resetPasswordWithCode, isSupabase } = useAuth();
+  const {
+    login,
+    register,
+    switchUser,
+    requestPasswordReset,
+    resetPasswordWithCode,
+    resetPasswordWithRecoveryKey,
+    newlyRegisteredKey,
+    clearNewlyRegisteredKey,
+    isSupabase
+  } = useAuth();
 
   const [mode, setMode] = useState<'login' | 'register' | 'forgot' | 'reset-code'>('login');
+  const [recoverySubTab, setRecoverySubTab] = useState<'recovery-key' | 'email'>('recovery-key');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -41,6 +54,11 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
+
+  // Recovery Key & Registration States
+  const [recoveryKeyInput, setRecoveryKeyInput] = useState('');
+  const [registrationRecoveryKey, setRegistrationRecoveryKey] = useState<string | null>(null);
+  const [isRegisteredModalOpen, setIsRegisteredModalOpen] = useState(false);
 
   // Countdown timer for 60-second recovery cooldown
   useEffect(() => {
@@ -114,7 +132,11 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
         if (!res.success) {
           setErrorMessage(res.error || 'No se pudo crear la cuenta.');
         } else {
-          setSuccessMessage('¡Cuenta creada con éxito! Accediendo a tu biblioteca...');
+          setSuccessMessage('¡Cuenta creada con éxito!');
+          if (res.recoveryKey) {
+            setRegistrationRecoveryKey(res.recoveryKey);
+            setIsRegisteredModalOpen(true);
+          }
         }
       } catch (err: any) {
         setErrorMessage(err.message || 'Error durante el registro.');
@@ -178,6 +200,57 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Error al solicitar la recuperación.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleRecoveryKeySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanKey = recoveryKeyInput.trim();
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setErrorMessage('Por favor ingresa tu correo electrónico registrado.');
+      return;
+    }
+
+    if (!cleanKey || cleanKey.length < 4) {
+      setErrorMessage('Por favor introduce tu Clave de Rescate de 8 caracteres (ej. RW84-9210 o RW88-9999).');
+      return;
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      setErrorMessage('La nueva contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setErrorMessage('Las contraseñas no coinciden. Asegúrate de escribirlas exactamente iguales.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await resetPasswordWithRecoveryKey(cleanEmail, cleanKey, newPassword);
+      if (!res.success) {
+        setErrorMessage(res.error || 'No se pudo restablecer la contraseña con la clave de rescate.');
+        return;
+      }
+
+      setPassword(newPassword);
+      setSuccessMessage(
+        res.message || '¡Tu contraseña ha sido restablecida con éxito con tu Clave de Rescate! Ya puedes iniciar sesión con tu nueva clave.'
+      );
+      setMode('login');
+      setRecoveryKeyInput('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Error al restablecer la contraseña.');
     } finally {
       setIsSubmitting(false);
     }
@@ -340,69 +413,225 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
               </div>
             )}
 
-            {/* MODE: FORGOT (Solicitar código o enlace al correo) */}
+            {/* MODE: FORGOT PASSWORD */}
             {mode === 'forgot' && (
-              <form onSubmit={handleRequestRecovery} className="p-6 space-y-4">
-                <div className="space-y-1">
-                  <h3 className="text-sm font-bold text-neutral-900">Restablecer tu Contraseña</h3>
-                  <p className="text-xs text-neutral-600 leading-relaxed">
-                    Ingresa el correo de tu cuenta. Si estás registrado, recibirás un correo seguro de recuperación para restablecer tu clave mediante enlace directo o código de verificación.
-                  </p>
+              <div className="p-6 space-y-4">
+                {/* Mode Selector: Recovery Key vs Email */}
+                <div className="grid grid-cols-2 p-1 bg-neutral-100/90 rounded-2xl gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRecoverySubTab('recovery-key');
+                      setErrorMessage(null);
+                      setSuccessMessage(null);
+                    }}
+                    className={`py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-bold transition-all cursor-pointer ${
+                      recoverySubTab === 'recovery-key'
+                        ? 'bg-white text-indigo-950 shadow-xs border border-neutral-200/80'
+                        : 'text-neutral-600 hover:text-neutral-900'
+                    }`}
+                  >
+                    <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Clave de Rescate (8 car.)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRecoverySubTab('email');
+                      setErrorMessage(null);
+                      setSuccessMessage(null);
+                    }}
+                    className={`py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 text-xs font-bold transition-all cursor-pointer ${
+                      recoverySubTab === 'email'
+                        ? 'bg-white text-indigo-950 shadow-xs border border-neutral-200/80'
+                        : 'text-neutral-600 hover:text-neutral-900'
+                    }`}
+                  >
+                    <Mail className="w-3.5 h-3.5 text-neutral-500" />
+                    <span>Por Correo</span>
+                  </button>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-neutral-700 mb-1.5">
-                    Correo electrónico
-                  </label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="tu@correo.com"
-                      autoComplete="email"
-                      className="w-full pl-10 pr-3 py-2.5 text-xs sm:text-sm bg-neutral-50/70 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-neutral-400"
-                    />
-                  </div>
-                </div>
+                {recoverySubTab === 'recovery-key' ? (
+                  <form onSubmit={handleRecoveryKeySubmit} className="space-y-4 animate-fade-in">
+                    {/* Reassurance Banner */}
+                    <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-indigo-50 border border-emerald-200/80 text-emerald-950 space-y-1">
+                      <div className="flex items-center gap-2 font-bold text-xs text-emerald-900">
+                        <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Recuperación instantánea con tu código de 8 caracteres</span>
+                      </div>
+                      <p className="text-[11px] text-emerald-900/90 leading-relaxed">
+                        Introduce la <strong>Clave de Rescate</strong> entregada al darte de alta (o visible en tu perfil). Funciona al instante sin esperar emails ni depender de enlaces que puedan caducar por el antivirus.
+                      </p>
+                    </div>
 
-                <button
-                  type="submit"
-                  disabled={isSubmitting || cooldown > 0}
-                  className="w-full py-3 px-4 bg-neutral-900 hover:bg-neutral-800 active:scale-[0.99] text-white rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md shadow-neutral-900/10 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
-                >
-                  {isSubmitting ? (
-                    <span>Verificando y enviando...</span>
-                  ) : cooldown > 0 ? (
-                    <>
-                      <Clock className="w-4 h-4 animate-pulse text-amber-300" />
-                      <span>Espera {cooldown}s para volver a enviar</span>
-                    </>
-                  ) : (
-                    <>
-                      <Mail className="w-4 h-4" />
-                      <span>Enviar Correo de Recuperación</span>
-                    </>
-                  )}
-                </button>
+                    <div>
+                      <label className="block text-xs font-semibold text-neutral-700 mb-1.5">
+                        Correo electrónico de tu cuenta
+                      </label>
+                      <div className="relative">
+                        <Mail className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="email"
+                          required
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="tu@correo.com"
+                          className="w-full pl-10 pr-3 py-2.5 text-xs sm:text-sm bg-neutral-50/70 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-neutral-400"
+                        />
+                      </div>
+                    </div>
 
-                {!isSupabase && (
-                  <div className="text-center pt-2">
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-semibold text-neutral-700">
+                          Clave Secreta de Rescate (8 caracteres)
+                        </label>
+                        <span className="text-[10px] text-neutral-400 font-mono">
+                          Ej: RW84-9210
+                        </span>
+                      </div>
+                      <div className="relative">
+                        <KeyRound className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          required
+                          value={recoveryKeyInput}
+                          onChange={(e) => setRecoveryKeyInput(e.target.value.toUpperCase())}
+                          placeholder="RW84-9210"
+                          maxLength={12}
+                          className="w-full pl-10 pr-3 py-2.5 font-mono text-center tracking-widest text-base sm:text-lg uppercase bg-neutral-50/70 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all font-bold placeholder:font-normal placeholder:tracking-normal placeholder:text-neutral-400"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-semibold text-neutral-700">
+                          Nueva Contraseña
+                        </label>
+                        {newPassword && (
+                          <span className={`text-[11px] font-semibold ${strength.textClass}`}>
+                            {strength.text}
+                          </span>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="Mínimo 6 caracteres"
+                          className="w-full pl-10 pr-10 py-2.5 text-xs sm:text-sm bg-neutral-50/70 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-neutral-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 p-1 cursor-pointer"
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-neutral-700 mb-1.5">
+                        Confirmar Nueva Contraseña
+                      </label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          value={confirmNewPassword}
+                          onChange={(e) => setConfirmNewPassword(e.target.value)}
+                          placeholder="Repite la nueva contraseña"
+                          className="w-full pl-10 pr-3 py-2.5 text-xs sm:text-sm bg-neutral-50/70 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-neutral-400"
+                        />
+                      </div>
+                    </div>
+
                     <button
-                      type="button"
-                      onClick={() => {
-                        setMode('reset-code');
-                        setErrorMessage(null);
-                      }}
-                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium hover:underline cursor-pointer"
+                      type="submit"
+                      disabled={isSubmitting || !email || !recoveryKeyInput || newPassword.length < 6 || newPassword !== confirmNewPassword}
+                      className="w-full py-3 px-4 bg-emerald-700 hover:bg-emerald-800 active:scale-[0.99] text-white rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md shadow-emerald-700/20 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      ¿Ya tienes un código o quieres introducirlo? Haz clic aquí →
+                      {isSubmitting ? (
+                        <span>Restableciendo contraseña...</span>
+                      ) : (
+                        <>
+                          <KeyRound className="w-4 h-4" />
+                          <span>Restablecer Contraseña al Instante</span>
+                        </>
+                      )}
                     </button>
-                  </div>
+                  </form>
+                ) : (
+                  <form onSubmit={handleRequestRecovery} className="space-y-4 animate-fade-in">
+                    <div className="space-y-1">
+                      <h3 className="text-sm font-bold text-neutral-900">Enviar Enlace por Correo</h3>
+                      <p className="text-xs text-neutral-600 leading-relaxed">
+                        Ingresa el correo de tu cuenta. Si estás registrado, recibirás un correo seguro para restablecer tu clave.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-neutral-700 mb-1.5">
+                        Correo electrónico
+                      </label>
+                      <div className="relative">
+                        <Mail className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="email"
+                          required
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="tu@correo.com"
+                          autoComplete="email"
+                          className="w-full pl-10 pr-3 py-2.5 text-xs sm:text-sm bg-neutral-50/70 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 transition-all placeholder:text-neutral-400"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSubmitting || cooldown > 0}
+                      className="w-full py-3 px-4 bg-neutral-900 hover:bg-neutral-800 active:scale-[0.99] text-white rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md shadow-neutral-900/10 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
+                    >
+                      {isSubmitting ? (
+                        <span>Verificando y enviando...</span>
+                      ) : cooldown > 0 ? (
+                        <>
+                          <Clock className="w-4 h-4 animate-pulse text-amber-300" />
+                          <span>Espera {cooldown}s para volver a enviar</span>
+                        </>
+                      ) : (
+                        <>
+                          <Mail className="w-4 h-4" />
+                          <span>Enviar Correo de Recuperación</span>
+                        </>
+                      )}
+                    </button>
+
+                    {!isSupabase && (
+                      <div className="text-center pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMode('reset-code');
+                            setErrorMessage(null);
+                          }}
+                          className="text-xs text-indigo-600 hover:text-indigo-800 font-medium hover:underline cursor-pointer"
+                        >
+                          ¿Ya tienes un código numérico? Haz clic aquí →
+                        </button>
+                      </div>
+                    )}
+                  </form>
                 )}
-              </form>
+              </div>
             )}
 
             {/* MODE: RESET-CODE (Introducir código y nueva clave) */}
@@ -673,6 +902,7 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
                         type="button"
                         onClick={() => {
                           setMode('forgot');
+                          setRecoverySubTab('recovery-key');
                           setErrorMessage(null);
                           setSuccessMessage(null);
                         }}
@@ -835,6 +1065,18 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
           {APP_VERSION}
         </span>
       </footer>
+
+      {/* Recovery Key Modal upon registration */}
+      <RecoveryKeyModal
+        isOpen={isRegisteredModalOpen || !!registrationRecoveryKey}
+        onClose={() => {
+          setIsRegisteredModalOpen(false);
+          setRegistrationRecoveryKey(null);
+        }}
+        recoveryKey={registrationRecoveryKey}
+        email={email}
+        isInitialRegistration={true}
+      />
     </div>
   );
 };

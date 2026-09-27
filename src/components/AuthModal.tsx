@@ -29,7 +29,7 @@ interface AuthModalProps {
   onOpenSupabaseGuide?: () => void;
 }
 
-type AuthTab = 'login' | 'register' | 'forgot-password' | 'reset-code';
+type AuthTab = 'login' | 'register' | 'forgot-password' | 'reset-code' | 'recovery-key';
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
@@ -44,6 +44,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     getLoginLockout,
     requestPasswordReset,
     resetPasswordWithCode,
+    resetPasswordWithRecoveryKey,
   } = useAuth();
 
   const [tab, setTab] = useState<AuthTab>('login');
@@ -54,6 +55,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Password recovery states
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
+  const [masterRecoveryKey, setMasterRecoveryKey] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -255,6 +257,56 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
+  // Handle Recovery via 8-character Master Recovery Key
+  const handleMasterRecoverySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSuccessMessage(null);
+
+    const targetEmail = (recoveryEmail || email).trim();
+    const key = masterRecoveryKey.trim();
+
+    if (!targetEmail || !targetEmail.includes('@')) {
+      setError('Por favor, ingresa un correo electrónico válido.');
+      return;
+    }
+
+    if (!key || key.length < 4) {
+      setError('Por favor, introduce tu Clave de Rescate de 8 caracteres (ej: RW88-9999).');
+      return;
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      setError('La nueva contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setError('Las dos contraseñas no coinciden.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await resetPasswordWithRecoveryKey(targetEmail, key, newPassword);
+      if (!res.success) {
+        setError(res.error || 'La clave de rescate no coincide o es inválida.');
+        return;
+      }
+
+      setEmail(targetEmail);
+      setPassword(newPassword);
+      setSuccessMessage('¡Contraseña restablecida con éxito con tu Clave de Rescate! Conectando...');
+      setTimeout(() => {
+        onClose();
+      }, 1200);
+    } catch (err: any) {
+      setError(err.message || 'Error al restablecer contraseña con la clave de rescate.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleQuickLogin = (member: typeof DEMO_TEAM_MEMBERS[0]) => {
     switchUser(member);
     setSuccessMessage(`Conectado como ${member.fullName}`);
@@ -289,14 +341,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <h2 className="text-xl font-bold tracking-tight text-white">
             {tab === 'login' && 'Iniciar Sesión en ReewAI'}
             {tab === 'register' && 'Crear Cuenta en ReewAI'}
-            {tab === 'forgot-password' && 'Recuperar Contraseña'}
+            {tab === 'forgot-password' && 'Recuperar Contraseña por Correo'}
             {tab === 'reset-code' && 'Restablecer Contraseña'}
+            {tab === 'recovery-key' && 'Recuperar con Clave de Rescate'}
           </h2>
           <p className="text-xs text-neutral-300 mt-1">
             {tab === 'login' && 'Tus reels y notas se guardan de forma privada para cada usuario.'}
             {tab === 'register' && 'Únete con tu correo para organizar y analizar tus enlaces con IA.'}
             {tab === 'forgot-password' && 'Comprobaremos que tu usuario esté dado de alta para restablecer tu clave.'}
             {tab === 'reset-code' && 'Introduce el código de verificación y define tu nueva clave de acceso.'}
+            {tab === 'recovery-key' && 'Introduce tu clave personal de 8 caracteres para cambiar tu clave sin esperar correos.'}
           </p>
         </div>
 
@@ -463,19 +517,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     Contraseña
                   </label>
                   {tab === 'login' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRecoveryEmail(email);
-                        setTab('forgot-password');
-                        setError(null);
-                        setSuccessMessage(null);
-                      }}
-                      className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer flex items-center gap-1"
-                    >
-                      <KeyRound className="w-3 h-3" />
-                      ¿Has olvidado tu contraseña?
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRecoveryEmail(email);
+                          setTab('recovery-key');
+                          setError(null);
+                          setSuccessMessage(null);
+                        }}
+                        className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <KeyRound className="w-3 h-3 text-indigo-600" />
+                        Usar Clave de Rescate
+                      </button>
+                      <span className="text-neutral-300 text-[10px]">|</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRecoveryEmail(email);
+                          setTab('forgot-password');
+                          setError(null);
+                          setSuccessMessage(null);
+                        }}
+                        className="text-[11px] text-neutral-500 hover:text-neutral-800 hover:underline cursor-pointer"
+                      >
+                        Por correo
+                      </button>
+                    </div>
                   )}
                 </div>
                 <div className="relative">
@@ -793,6 +862,141 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <>
                         <span>Guardar contraseña</span>
                         <Check className="w-3.5 h-3.5" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* ================= VIEW 5: RESET WITH RECOVERY KEY ================= */}
+          {tab === 'recovery-key' && (
+            <div className="space-y-4">
+              <div className="p-3.5 bg-indigo-50/90 border border-indigo-200/90 rounded-xl text-xs space-y-1.5 animate-fade-in">
+                <div className="flex items-center gap-2 font-semibold text-xs text-indigo-950">
+                  <KeyRound className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>Rescate Instantáneo con Llave Maestra</span>
+                </div>
+                <p className="text-[11px] text-indigo-900/90 leading-relaxed">
+                  Introduce tu Clave de Rescate personal de 8 caracteres. Podrás definir tu nueva contraseña al instante sin depender de correos electrónicos.
+                </p>
+              </div>
+
+              <form onSubmit={handleMasterRecoverySubmit} className="space-y-3">
+                {/* Email */}
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                    Correo Electrónico
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-4 h-4 absolute left-3 top-2.5 text-neutral-400" />
+                    <input
+                      type="email"
+                      required
+                      value={recoveryEmail || email}
+                      onChange={(e) => setRecoveryEmail(e.target.value)}
+                      placeholder="tu@correo.com"
+                      className="w-full pl-9 pr-3 py-2 text-xs border border-neutral-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden"
+                    />
+                  </div>
+                </div>
+
+                {/* 8-char Key */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-neutral-700">
+                      Clave de Rescate (8 caracteres)
+                    </label>
+                    <span className="text-[10px] text-neutral-400 font-mono">Ej: RW88-9999</span>
+                  </div>
+                  <div className="relative">
+                    <KeyRound className="w-4 h-4 absolute left-3 top-2.5 text-indigo-500" />
+                    <input
+                      type="text"
+                      required
+                      maxLength={15}
+                      value={masterRecoveryKey}
+                      onChange={(e) => setMasterRecoveryKey(e.target.value.toUpperCase())}
+                      placeholder="XXXX-XXXX"
+                      className="w-full pl-9 pr-3 py-2 text-xs font-mono font-bold tracking-widest text-indigo-950 uppercase border border-indigo-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden bg-indigo-50/20"
+                    />
+                  </div>
+                </div>
+
+                {/* New Password */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-neutral-700">
+                      Nueva Contraseña
+                    </label>
+                    <span className="text-[10px] text-neutral-400">Mínimo 6 caracteres</span>
+                  </div>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 absolute left-3 top-2.5 text-neutral-400" />
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Mínimo 6 caracteres"
+                      className="w-full pl-9 pr-10 py-2 text-xs border border-neutral-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 top-2.5 text-neutral-400 hover:text-neutral-700 cursor-pointer"
+                    >
+                      {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Confirm Password */}
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-700 mb-1">
+                    Confirmar Nueva Contraseña
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 absolute left-3 top-2.5 text-neutral-400" />
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      placeholder="Repite la nueva contraseña"
+                      className="w-full pl-9 pr-3 py-2 text-xs border border-neutral-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-hidden"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTab('login');
+                      setError(null);
+                    }}
+                    className="flex-1 py-2 text-xs font-medium text-neutral-700 bg-neutral-100 hover:bg-neutral-200 rounded-xl transition-colors cursor-pointer"
+                  >
+                    Atrás
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting || newPassword.length < 6 || masterRecoveryKey.length < 4}
+                    className="flex-2 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Restableciendo...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Restablecer y Entrar</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
                       </>
                     )}
                   </button>

@@ -316,13 +316,14 @@ export class DatabaseService {
   static async register(
     email: string,
     password?: string,
-    fullName?: string
+    fullName?: string,
+    recoveryKey?: string
   ): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, fullName }),
+        body: JSON.stringify({ email, password, fullName, recoveryKey }),
       });
       const parsed = await safeParseJson(res);
       if (!parsed.isJson || !res.ok || !parsed.data?.success) {
@@ -383,6 +384,58 @@ export class DatabaseService {
         success: true,
         message: parsed.data.message || '¡Contraseña actualizada con éxito!',
       };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Error de conexión con el servidor.' };
+    }
+  }
+
+  /**
+   * Resets password using the 8-character Master Recovery Key.
+   */
+  static async resetPasswordWithRecoveryKey(
+    email: string,
+    recoveryKey: string,
+    newPassword: string
+  ): Promise<{ success: boolean; newRecoveryKey?: string; user?: UserProfile; message?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/auth/reset-with-recovery-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, recoveryKey, newPassword }),
+      });
+      const parsed = await safeParseJson(res);
+      if (!parsed.isJson || !res.ok || !parsed.data?.success) {
+        return {
+          success: false,
+          error: parsed.data?.error || 'No se pudo restablecer la contraseña con la clave de rescate.',
+        };
+      }
+      return {
+        success: true,
+        newRecoveryKey: parsed.data.newRecoveryKey,
+        user: parsed.data.user,
+        message: parsed.data.message,
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Error de conexión con el servidor.' };
+    }
+  }
+
+  /**
+   * Regenerates a new recovery key on the server for the user.
+   */
+  static async regenerateRecoveryKey(userId: string): Promise<{ success: boolean; recoveryKey?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/auth/regenerate-recovery-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      const parsed = await safeParseJson(res);
+      if (!parsed.isJson || !res.ok || !parsed.data?.success) {
+        return { success: false, error: parsed.data?.error || 'Error al regenerar clave de rescate.' };
+      }
+      return { success: true, recoveryKey: parsed.data.recoveryKey };
     } catch (err: any) {
       return { success: false, error: err.message || 'Error de conexión con el servidor.' };
     }

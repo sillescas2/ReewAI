@@ -17,6 +17,7 @@ interface NavbarProps {
   onOpenUsersManagement?: () => void;
   onOpenSettings?: () => void;
   onOpenGeminiGuide?: () => void;
+  onOpenRecoveryKey?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -30,6 +31,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenUsersManagement,
   onOpenSettings,
   onOpenGeminiGuide,
+  onOpenRecoveryKey,
 }) => {
   const { isKeyMissing, status } = useAiStatus();
   const isNetlifyEnv = status?.environment === 'netlify';
@@ -115,6 +117,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               onOpenEditProfile={onOpenEditProfile}
               onOpenUsersManagement={onOpenUsersManagement}
               onOpenSettings={onOpenSettings}
+              onOpenRecoveryKey={onOpenRecoveryKey}
             />
           </div>
         </div>
@@ -205,6 +208,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               onOpenEditProfile={onOpenEditProfile}
               onOpenUsersManagement={onOpenUsersManagement}
               onOpenSettings={onOpenSettings}
+              onOpenRecoveryKey={onOpenRecoveryKey}
             />
           </div>
         </div>

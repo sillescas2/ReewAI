@@ -8,6 +8,7 @@ export interface UserProfile {
   role?: 'admin' | 'user' | 'editor';
   password?: string;
   createdAt?: string;
+  recoveryKey?: string;
 }
 
 export interface TopicDuplicateCheck {

@@ -17,6 +17,7 @@ export interface DemoTeamMember {
   role: 'admin' | 'user' | 'editor';
   jobTitle: string;
   password?: string;
+  recoveryKey?: string;
 }
 
 export const isSuperAdminEmail = (email?: string | null): boolean => {
@@ -24,6 +25,23 @@ export const isSuperAdminEmail = (email?: string | null): boolean => {
   const clean = email.trim().toLowerCase();
   return clean === 'xxxx@gmaxl.xxx' || clean === 'sillescas2@gmail.com';
 };
+
+// Characters excluding confusing glyphs (0, O, 1, I)
+const RECOVERY_KEY_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+
+export function generateRecoveryKeyCode(): string {
+  let part1 = '';
+  let part2 = '';
+  for (let i = 0; i < 4; i++) {
+    part1 += RECOVERY_KEY_CHARS.charAt(Math.floor(Math.random() * RECOVERY_KEY_CHARS.length));
+    part2 += RECOVERY_KEY_CHARS.charAt(Math.floor(Math.random() * RECOVERY_KEY_CHARS.length));
+  }
+  return `${part1}-${part2}`;
+}
+
+export function normalizeRecoveryKey(raw: string): string {
+  return (raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
 
 export const DEMO_TEAM_MEMBERS: DemoTeamMember[] = [
   {
@@ -34,6 +52,7 @@ export const DEMO_TEAM_MEMBERS: DemoTeamMember[] = [
     role: 'admin',
     jobTitle: 'Superadministrador',
     password: 'admin',
+    recoveryKey: 'RW88-9999',
   },
   {
     id: 'usr_prueba',
@@ -43,6 +62,7 @@ export const DEMO_TEAM_MEMBERS: DemoTeamMember[] = [
     role: 'editor',
     jobTitle: 'Cuenta de Prueba',
     password: 'prueba',
+    recoveryKey: 'PRUE-2026',
   },
 ];
 
@@ -54,7 +74,7 @@ interface AuthContextType {
   isLoading: boolean;
   isSupabase: boolean;
   login: (email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
-  register: (email: string, password?: string, fullName?: string) => Promise<{ success: boolean; error?: string }>;
+  register: (email: string, password?: string, fullName?: string) => Promise<{ success: boolean; error?: string; recoveryKey?: string }>;
   logout: () => Promise<void>;
   switchUser: (targetUser: UserProfile | DemoTeamMember) => void;
   availableUsers: UserProfile[];
@@ -88,6 +108,19 @@ interface AuthContextType {
     error?: string;
     message?: string;
   }>;
+  resetPasswordWithRecoveryKey: (
+    email: string,
+    recoveryKey: string,
+    newPassword: string
+  ) => Promise<{
+    success: boolean;
+    newRecoveryKey?: string;
+    error?: string;
+    message?: string;
+  }>;
+  regenerateRecoveryKey: () => Promise<{ success: boolean; recoveryKey?: string; error?: string }>;
+  newlyRegisteredKey: string | null;
+  clearNewlyRegisteredKey: () => void;
   recoveryFlow: PasswordRecoveryFlowState;
   closeRecoveryFlow: () => void;
   updatePasswordDirectly: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
@@ -113,6 +146,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isActive: false,
     type: 'none',
   });
+
+  // Master recovery key modal for newly registered users
+  const [newlyRegisteredKey, setNewlyRegisteredKey] = useState<string | null>(null);
+  const clearNewlyRegisteredKey = () => setNewlyRegisteredKey(null);
 
   const closeRecoveryFlow = () => {
     setRecoveryFlow({ isActive: false, type: 'none' });
@@ -513,15 +550,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const register = async (email: string, password?: string, fullName?: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const generatedRecoveryKey = generateRecoveryKeyCode();
+
     if (isSupabase) {
       const supabase = getSupabaseClient();
       if (!supabase) return { success: false, error: 'Supabase no inicializado' };
       const { data, error } = await supabase.auth.signUp({
-        email,
+        email: cleanEmail,
         password: password || '',
         options: {
           data: {
-            full_name: fullName || email.split('@')[0],
+            full_name: fullName || cleanEmail.split('@')[0],
+            recovery_key: generatedRecoveryKey,
           },
           emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
         },
@@ -529,17 +570,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error) {
         return { success: false, error: error.message };
       }
+      try {
+        localStorage.setItem(`reewai_recovery_key_${cleanEmail}`, generatedRecoveryKey);
+      } catch {}
+      setNewlyRegisteredKey(generatedRecoveryKey);
+
       if (data.user) {
         setUser({
           id: data.user.id,
-          email: data.user.email || '',
-          fullName: fullName || email.split('@')[0],
+          email: data.user.email || cleanEmail,
+          fullName: fullName || cleanEmail.split('@')[0],
           role: isSuperAdminEmail(data.user.email) ? 'admin' : 'user',
+          recoveryKey: generatedRecoveryKey,
         });
       }
-      return { success: true };
+      return { success: true, recoveryKey: generatedRecoveryKey };
     } else {
-      const cleanEmail = email.trim().toLowerCase();
       const existing = availableUsers.find((u) => u.email.toLowerCase() === cleanEmail);
       if (existing) {
         return { success: false, error: 'Este correo electrónico ya está registrado.' };
@@ -551,11 +597,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         fullName: fullName?.trim() || cleanEmail.split('@')[0],
         role: isSuperAdminEmail(cleanEmail) ? 'admin' : 'user',
         password: password?.trim() || '',
+        recoveryKey: generatedRecoveryKey,
         createdAt: new Date().toISOString(),
       };
 
+      try {
+        localStorage.setItem(`reewai_recovery_key_${cleanEmail}`, generatedRecoveryKey);
+      } catch {}
+
       // Also persist to central database
-      DatabaseService.register(cleanEmail, password?.trim(), fullName?.trim()).catch((err) => {
+      DatabaseService.register(cleanEmail, password?.trim(), fullName?.trim(), generatedRecoveryKey).catch((err) => {
         console.warn('Could not register user to central DB:', err);
       });
 
@@ -567,8 +618,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       );
 
       setUser(newUser);
+      setNewlyRegisteredKey(generatedRecoveryKey);
       localStorage.setItem(LOCAL_ACTIVE_USER_KEY, newUser.id);
-      return { success: true };
+      return { success: true, recoveryKey: generatedRecoveryKey };
     }
   };
 
@@ -924,6 +976,184 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       success: true,
       message: '¡Contraseña restablecida correctamente! Ya puedes iniciar sesión con tu nueva clave.',
     };
+  };
+
+  /**
+   * Resets user password instantly using their 8-character Master Recovery Key.
+   * Completely bypasses email delivery delays, spam filters, and link expiration.
+   */
+  const resetPasswordWithRecoveryKey = async (
+    rawEmail: string,
+    rawKey: string,
+    rawNewPassword: string
+  ): Promise<{ success: boolean; newRecoveryKey?: string; message?: string; error?: string }> => {
+    const cleanEmail = (rawEmail || '').trim().toLowerCase();
+    const normInputKey = normalizeRecoveryKey(rawKey);
+    const cleanPassword = (rawNewPassword || '').trim();
+
+    if (!cleanEmail || !normInputKey || !cleanPassword) {
+      return { success: false, error: 'Por favor, completa todos los campos requeridos (correo, clave de rescate y nueva contraseña).' };
+    }
+
+    if (cleanPassword.length < 6) {
+      return { success: false, error: 'La nueva contraseña debe tener al menos 6 caracteres.' };
+    }
+
+    // 1. Try central server DB first
+    try {
+      const serverRes = await DatabaseService.resetPasswordWithRecoveryKey(cleanEmail, normInputKey, cleanPassword);
+      if (serverRes.success && serverRes.newRecoveryKey) {
+        try {
+          localStorage.setItem(`reewai_recovery_key_${cleanEmail}`, serverRes.newRecoveryKey);
+        } catch {}
+
+        const updatedList = availableUsers.map((u) =>
+          u.email.toLowerCase() === cleanEmail
+            ? { ...u, password: cleanPassword, recoveryKey: serverRes.newRecoveryKey }
+            : u
+        );
+        setAvailableUsers(updatedList);
+        try {
+          localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(updatedList));
+        } catch {}
+
+        if (user && user.email.toLowerCase() === cleanEmail) {
+          setUser({ ...user, password: cleanPassword, recoveryKey: serverRes.newRecoveryKey });
+        } else if (serverRes.user) {
+          setUser({ ...serverRes.user, recoveryKey: serverRes.newRecoveryKey });
+          try {
+            localStorage.setItem(LOCAL_ACTIVE_USER_KEY, serverRes.user.id);
+          } catch {}
+        }
+
+        if (isSupabase) {
+          const supabase = getSupabaseClient();
+          if (supabase) {
+            supabase.auth.updateUser({
+              password: cleanPassword,
+              data: { recovery_key: serverRes.newRecoveryKey },
+            }).catch(() => {});
+          }
+        }
+
+        return {
+          success: true,
+          newRecoveryKey: serverRes.newRecoveryKey,
+          message: '¡Contraseña restablecida con éxito! Tu nueva Clave de Rescate ha sido generada.',
+        };
+      } else if (serverRes.error && !serverRes.error.includes('conexión') && !serverRes.error.includes('servidor')) {
+        // If server responded with explicit business logic error (e.g. key mismatch)
+        return { success: false, error: serverRes.error };
+      }
+    } catch (e) {
+      console.warn('Central server reset failed, falling back to local storage:', e);
+    }
+
+    // 2. Client / Local fallback (e.g. static hosting on Netlify)
+    let storedKey = '';
+    try {
+      storedKey = localStorage.getItem(`reewai_recovery_key_${cleanEmail}`) || '';
+    } catch {}
+
+    const targetUser = availableUsers.find((u) => u.email.toLowerCase() === cleanEmail);
+    if (!storedKey && targetUser?.recoveryKey) {
+      storedKey = targetUser.recoveryKey;
+    }
+
+    if (!storedKey) {
+      const demo = DEMO_TEAM_MEMBERS.find((d) => d.email.toLowerCase() === cleanEmail);
+      if (demo?.recoveryKey) storedKey = demo.recoveryKey;
+    }
+
+    if (!storedKey) {
+      return {
+        success: false,
+        error: 'No se encontró ninguna Clave de Rescate registrada para este correo. Verifica que el correo esté bien escrito o crea una cuenta.',
+      };
+    }
+
+    if (normalizeRecoveryKey(storedKey) !== normInputKey) {
+      return {
+        success: false,
+        error: 'La Clave de Rescate no coincide con la registrada para esta cuenta. Comprueba los 8 dígitos introducidos.',
+      };
+    }
+
+    // Valid recovery key! Rotate key for security
+    const newRotatedKey = generateRecoveryKeyCode();
+    try {
+      localStorage.setItem(`reewai_recovery_key_${cleanEmail}`, newRotatedKey);
+    } catch {}
+
+    const updatedList = availableUsers.map((u) =>
+      u.email.toLowerCase() === cleanEmail
+        ? { ...u, password: cleanPassword, recoveryKey: newRotatedKey }
+        : u
+    );
+    setAvailableUsers(updatedList);
+    try {
+      localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(updatedList));
+    } catch {}
+
+    if (user && user.email.toLowerCase() === cleanEmail) {
+      setUser({ ...user, password: cleanPassword, recoveryKey: newRotatedKey });
+    } else if (targetUser) {
+      const loggedIn = { ...targetUser, password: cleanPassword, recoveryKey: newRotatedKey };
+      setUser(loggedIn);
+      try {
+        localStorage.setItem(LOCAL_ACTIVE_USER_KEY, loggedIn.id);
+      } catch {}
+    }
+
+    if (isSupabase) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        supabase.auth.updateUser({
+          password: cleanPassword,
+          data: { recovery_key: newRotatedKey },
+        }).catch(() => {});
+      }
+    }
+
+    return {
+      success: true,
+      newRecoveryKey: newRotatedKey,
+      message: '¡Contraseña restablecida con éxito con tu Clave de Rescate!',
+    };
+  };
+
+  /**
+   * Regenerates a new recovery key for the active user.
+   */
+  const regenerateRecoveryKey = async (): Promise<{ success: boolean; recoveryKey?: string; error?: string }> => {
+    if (!user) return { success: false, error: 'Usuario no conectado.' };
+
+    const newKey = generateRecoveryKeyCode();
+    const updatedUser = { ...user, recoveryKey: newKey };
+    setUser(updatedUser);
+
+    try {
+      localStorage.setItem(`reewai_recovery_key_${user.email.toLowerCase()}`, newKey);
+    } catch {}
+
+    const updatedList = availableUsers.map((u) =>
+      u.id === user.id ? { ...u, recoveryKey: newKey } : u
+    );
+    setAvailableUsers(updatedList);
+    try {
+      localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(updatedList));
+    } catch {}
+
+    DatabaseService.regenerateRecoveryKey(user.id).catch(() => {});
+
+    if (isSupabase) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        supabase.auth.updateUser({ data: { recovery_key: newKey } }).catch(() => {});
+      }
+    }
+
+    return { success: true, recoveryKey: newKey };
   };
 
   const updatePasswordDirectly = async (
@@ -1423,6 +1653,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         getLoginLockout: (email?: string) => getLockoutState(email),
         requestPasswordReset,
         resetPasswordWithCode,
+        resetPasswordWithRecoveryKey,
+        regenerateRecoveryKey,
+        newlyRegisteredKey,
+        clearNewlyRegisteredKey,
         recoveryFlow,
         closeRecoveryFlow,
         updatePasswordDirectly,

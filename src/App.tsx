@@ -17,6 +17,7 @@ import { SettingsView } from './components/SettingsView';
 import { AiStatusBanner } from './components/AiStatusBanner';
 import { NetlifyGeminiModal } from './components/NetlifyGeminiModal';
 import { PasswordResetModal } from './components/PasswordResetModal';
+import { RecoveryKeyModal } from './components/RecoveryKeyModal';
 import { useAuth } from './context/AuthContext';
 import { USER_SAMPLE_DATA } from './data/sampleData';
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
@@ -28,11 +29,12 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  const { user, isLoading: isAuthLoading, isSupabase } = useAuth();
+  const { user, isLoading: isAuthLoading, isSupabase, newlyRegisteredKey, clearNewlyRegisteredKey } = useAuth();
   const [items, setItems] = useState<SavedLinkItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [syncVersion, setSyncVersion] = useState(0);
   const [importToastMessage, setImportToastMessage] = useState<string | null>(null);
+  const [isRecoveryKeyModalOpen, setIsRecoveryKeyModalOpen] = useState(false);
 
   // Current Screen / View Navigation
   const [currentView, setCurrentView] = useState<'links' | 'users' | 'settings'>('links');
@@ -668,6 +670,14 @@ export default function App() {
         <AuthLandingScreen
           onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
         />
+        <RecoveryKeyModal
+          isOpen={!!newlyRegisteredKey}
+          onClose={() => {
+            if (clearNewlyRegisteredKey) clearNewlyRegisteredKey();
+          }}
+          recoveryKey={newlyRegisteredKey}
+          isInitialRegistration={true}
+        />
         <PasswordResetModal />
         <SupabaseModal
           isOpen={isSupabaseModalOpen}
@@ -692,6 +702,7 @@ export default function App() {
         onOpenUsersManagement={() => setCurrentView('users')}
         onOpenSettings={() => setCurrentView('settings')}
         onOpenGeminiGuide={() => setIsGeminiModalOpen(true)}
+        onOpenRecoveryKey={() => setIsRecoveryKeyModalOpen(true)}
       />
 
       {/* Real-time notification if GEMINI_API_KEY is not configured in Netlify */}
@@ -889,6 +900,16 @@ export default function App() {
       />
 
       <PasswordResetModal />
+      <RecoveryKeyModal
+        isOpen={isRecoveryKeyModalOpen || !!newlyRegisteredKey}
+        onClose={() => {
+          setIsRecoveryKeyModalOpen(false);
+          if (clearNewlyRegisteredKey) clearNewlyRegisteredKey();
+        }}
+        recoveryKey={newlyRegisteredKey || user?.recoveryKey}
+        email={user?.email}
+        isInitialRegistration={!!newlyRegisteredKey}
+      />
       <OfflineIndicator />
     </div>
   );

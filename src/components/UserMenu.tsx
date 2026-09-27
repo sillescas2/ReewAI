@@ -10,7 +10,8 @@ import {
   Camera,
   ChevronRight,
   Settings,
-  Sparkles
+  Sparkles,
+  KeyRound
 } from 'lucide-react';
 import { useAuth, DEMO_TEAM_MEMBERS } from '../context/AuthContext';
 import { APP_VERSION } from '../constants/version';
@@ -27,6 +28,7 @@ interface UserMenuProps {
   onOpenEditProfile?: () => void;
   onOpenUsersManagement?: () => void;
   onOpenSettings?: () => void;
+  onOpenRecoveryKey?: () => void;
 }
 
 export const UserMenu: React.FC<UserMenuProps> = ({
@@ -35,6 +37,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   onOpenEditProfile,
   onOpenUsersManagement,
   onOpenSettings,
+  onOpenRecoveryKey,
 }) => {
   const { user, logout, switchUser } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
@@ -195,6 +198,33 @@ export const UserMenu: React.FC<UserMenuProps> = ({
                   <div>
                     <p className="font-semibold text-neutral-900 leading-tight">Editar mi perfil</p>
                     <p className="text-[10px] text-neutral-400 leading-tight">Cambiar foto, nombre o correo</p>
+                  </div>
+                </div>
+                <ChevronRight className="w-3.5 h-3.5 text-neutral-400" />
+              </button>
+            )}
+
+            {/* Option: Clave de Rescate Personal (8 caracteres) */}
+            {onOpenRecoveryKey && (
+              <button
+                id="btn-open-recovery-key-menu"
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  onOpenRecoveryKey();
+                }}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-neutral-100 text-left transition-colors cursor-pointer text-neutral-800 font-medium"
+              >
+                <div className="flex items-center gap-2.5">
+                  <KeyRound className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div>
+                    <p className="font-semibold text-neutral-900 leading-tight flex items-center gap-1.5">
+                      <span>Clave de Rescate</span>
+                      <span className="text-[9px] font-mono font-bold uppercase bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded">
+                        8 car.
+                      </span>
+                    </p>
+                    <p className="text-[10px] text-neutral-400 leading-tight">Ver o descargar tu código de rescate</p>
                   </div>
                 </div>
                 <ChevronRight className="w-3.5 h-3.5 text-neutral-400" />
