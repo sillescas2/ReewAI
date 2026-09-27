@@ -23,7 +23,8 @@ import {
   getSupabaseConfig,
   saveCustomSupabaseConfig,
   clearCustomSupabaseConfig,
-  getSupabaseClient
+  getSupabaseClient,
+  sanitizeSupabaseUrl
 } from '../lib/supabaseClient';
 import { SavedLinkItem } from '../types';
 import { APP_VERSION } from '../constants/version';
@@ -74,7 +75,7 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
 
   const handleSaveConnection = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanUrl = inputUrl.trim();
+    const cleanUrl = sanitizeSupabaseUrl(inputUrl);
     const cleanKey = inputKey.trim();
 
     if (!cleanUrl || !cleanKey) {
@@ -98,6 +99,7 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
 
     try {
       saveCustomSupabaseConfig(cleanUrl, cleanKey);
+      setInputUrl(cleanUrl);
       const client = getSupabaseClient();
       if (!client) {
         throw new Error('No se pudo inicializar el cliente de Supabase.');

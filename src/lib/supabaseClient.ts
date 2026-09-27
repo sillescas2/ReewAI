@@ -6,8 +6,27 @@ export interface SupabaseConfigInfo {
   source: 'env' | 'custom' | 'none';
 }
 
+export const sanitizeSupabaseUrl = (rawUrl: string): string => {
+  let trimmed = (rawUrl || '').trim();
+  if (!trimmed) return '';
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    trimmed = `https://${trimmed}`;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    // Supabase project URL must be origin only (protocol + domain + port).
+    // Subpaths like /rest/v1 or /auth/v1 break auth endpoint calls and trigger PGRST125.
+    return parsed.origin;
+  } catch {
+    return trimmed
+      .replace(/\/rest\/v1\/?$/i, '')
+      .replace(/\/auth\/v1\/?$/i, '')
+      .replace(/\/+$/, '');
+  }
+};
+
 export const getSupabaseConfig = (): SupabaseConfigInfo => {
-  const envUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+  const envUrl = sanitizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL || '');
   const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
   if (envUrl.startsWith('http') && envKey.length > 0) {
@@ -15,7 +34,7 @@ export const getSupabaseConfig = (): SupabaseConfigInfo => {
   }
 
   if (typeof window !== 'undefined') {
-    const customUrl = (localStorage.getItem('reewai_custom_supabase_url') || '').trim();
+    const customUrl = sanitizeSupabaseUrl(localStorage.getItem('reewai_custom_supabase_url') || '');
     const customKey = (localStorage.getItem('reewai_custom_supabase_key') || '').trim();
     if (customUrl.startsWith('http') && customKey.length > 0) {
       return { url: customUrl, anonKey: customKey, source: 'custom' };
@@ -62,7 +81,8 @@ export const getSupabaseClient = (): SupabaseClient | null => {
 
 export const saveCustomSupabaseConfig = (url: string, key: string) => {
   if (typeof window !== 'undefined') {
-    localStorage.setItem('reewai_custom_supabase_url', url.trim());
+    const cleanUrl = sanitizeSupabaseUrl(url);
+    localStorage.setItem('reewai_custom_supabase_url', cleanUrl);
     localStorage.setItem('reewai_custom_supabase_key', key.trim());
     clientInstance = null;
     currentClientKey = '';

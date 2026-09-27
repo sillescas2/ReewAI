@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   Lock,
@@ -18,7 +18,8 @@ import {
   AlertCircle,
   Users,
   Layers,
-  ChevronRight
+  ChevronRight,
+  Clock
 } from 'lucide-react';
 import { useAuth, DEMO_TEAM_MEMBERS, DemoTeamMember } from '../context/AuthContext';
 import { APP_VERSION } from '../constants/version';
@@ -39,6 +40,16 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
+
+  // Countdown timer for 60-second recovery cooldown
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setInterval(() => {
+      setCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldown]);
 
   // Password Recovery States
   const [recoveryCode, setRecoveryCode] = useState('');
@@ -142,9 +153,13 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
       const res = await requestPasswordReset(cleanEmail);
       if (!res.success) {
         setErrorMessage(res.error || 'No se pudo procesar la solicitud de recuperación.');
+        if (res.error && res.error.toLowerCase().includes('60 segundos')) {
+          setCooldown(60);
+        }
         return;
       }
 
+      setCooldown(60);
       setRecoveryCode('');
       setNewPassword('');
       setConfirmNewPassword('');
@@ -355,11 +370,16 @@ export const AuthLandingScreen: React.FC<AuthLandingScreenProps> = () => {
 
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || cooldown > 0}
                   className="w-full py-3 px-4 bg-neutral-900 hover:bg-neutral-800 active:scale-[0.99] text-white rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md shadow-neutral-900/10 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? (
                     <span>Verificando y enviando...</span>
+                  ) : cooldown > 0 ? (
+                    <>
+                      <Clock className="w-4 h-4 animate-pulse text-amber-300" />
+                      <span>Espera {cooldown}s para volver a enviar</span>
+                    </>
                   ) : (
                     <>
                       <Mail className="w-4 h-4" />

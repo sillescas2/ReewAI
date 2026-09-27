@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { UserProfile } from '../types';
-import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
+import { getSupabaseClient, isSupabaseConfigured, getSupabaseConfig } from '../lib/supabaseClient';
 import { DatabaseService } from '../services/dbService';
 import {
   getLockoutState,
@@ -165,13 +165,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const code = searchParams.get('code') || hashParams.get('code');
       const tokenHash = searchParams.get('token_hash') || hashParams.get('token_hash');
 
-      if (type === 'recovery' || (accessToken && type === 'recovery') || (code && type === 'recovery') || tokenHash) {
+      if (accessToken || type === 'recovery' || (code && type === 'recovery') || tokenHash) {
+        let extractedEmail = '';
+        let extractedSupabaseUrl = '';
+
+        if (accessToken) {
+          try {
+            const parts = accessToken.split('.');
+            if (parts.length >= 2) {
+              const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+              const jsonPayload = decodeURIComponent(
+                atob(base64)
+                  .split('')
+                  .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+                  .join('')
+              );
+              const decoded = JSON.parse(jsonPayload);
+              if (decoded.email) {
+                extractedEmail = decoded.email;
+              }
+              if (decoded.iss && typeof decoded.iss === 'string' && decoded.iss.includes('.supabase.co')) {
+                extractedSupabaseUrl = decoded.iss.replace(/\/auth\/v1\/?$/, '').trim();
+                if (extractedSupabaseUrl) {
+                  try {
+                    sessionStorage.setItem('reewai_recovery_supabase_url', extractedSupabaseUrl);
+                    if (!localStorage.getItem('reewai_custom_supabase_url')) {
+                      localStorage.setItem('reewai_custom_supabase_url', extractedSupabaseUrl);
+                    }
+                  } catch {}
+                }
+              }
+            }
+            try {
+              sessionStorage.setItem('reewai_recovery_access_token', accessToken);
+            } catch {}
+          } catch (e) {
+            console.warn('JWT token inspection notice:', e);
+          }
+        }
+
         const lastEmail = (typeof window !== 'undefined' && localStorage.getItem('reewai_last_recovery_email')) || '';
         setRecoveryFlow((prev) => ({
           ...prev,
           isActive: true,
           type: 'set-new-password',
-          email: prev.email || lastEmail,
+          email: extractedEmail || prev.email || lastEmail,
         }));
       }
     };
@@ -599,9 +637,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ? `${window.location.origin}${window.location.pathname}`
             : undefined;
 
-          const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+          let { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
             redirectTo: redirectUrl,
           });
+
+          // Graceful fallback: If Supabase rejects the specific redirect URL (e.g. not in whitelist),
+          // retry immediately without explicit redirectTo so Supabase uses the default Site URL.
+          if (
+            error &&
+            (error.message.toLowerCase().includes('redirect') ||
+             error.message.toLowerCase().includes('not allowed'))
+          ) {
+            console.warn('Redirect URL rejected by Supabase, retrying with default Site URL fallback...');
+            const fallbackResult = await supabase.auth.resetPasswordForEmail(cleanEmail);
+            if (!fallbackResult.error) {
+              error = null;
+            } else {
+              error = fallbackResult.error;
+            }
+          }
 
           if (!error) {
             return {
@@ -615,18 +669,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const lower = msg.toLowerCase();
           console.warn('Supabase resetPasswordForEmail error:', msg);
 
-          // Rate limiting (60-second cooldown in Supabase)
+          // Hourly rate limit of Supabase built-in email service (Free tier max 3-4 emails/hour)
           if (
-            lower.includes('rate limit') ||
+            lower.includes('over_email_send_rate_limit') ||
+            (lower.includes('rate limit') && !lower.includes('60 seconds')) ||
+            (lower.includes('exceeded') && lower.includes('limit'))
+          ) {
+            return {
+              success: false,
+              isSupabase: true,
+              error: 'Supabase ha alcanzado el límite de correos por hora de su servicio gratuito (máx. 3 o 4 correos/hora). Para envíos ilimitados e inmediatos, activa un SMTP gratuito (ej. Resend) en el botón "Set up SMTP" de tu panel de Supabase, o espera a que se reinicie la cuota de la hora.',
+            };
+          }
+
+          // Rate limiting (60-second cooldown in Supabase between consecutive requests)
+          if (
             lower.includes('once every') ||
+            lower.includes('60 seconds') ||
             lower.includes('security purposes') ||
-            lower.includes('seconds') ||
             lower.includes('429')
           ) {
             return {
               success: false,
               isSupabase: true,
-              error: 'Por motivos de seguridad, Supabase solo permite enviar un correo cada 60 segundos. Por favor, espera unos segundos antes de pulsar "Enviar nuevo enlace".',
+              error: 'Por motivos de seguridad, Supabase exige esperar 60 segundos entre envíos de correo. Por favor, aguarda un momento antes de volver a solicitarlo.',
             };
           }
 
@@ -643,12 +709,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             };
           }
 
-          // Redirect URL configuration issues
-          if (lower.includes('redirect') || lower.includes('url')) {
+          // Invalid path / malformed URL endpoint
+          if (lower.includes('invalid path') || lower.includes('pgrst125')) {
             return {
               success: false,
               isSupabase: true,
-              error: `Error de configuración en Supabase: la URL de redirección no está autorizada. ${msg}`,
+              error: 'La dirección URL de Supabase guardada contenía una subruta (ej. /rest/v1). Se ha corregido automáticamente al dominio base. Vuelve a pulsar "Enviar Correo de Recuperación".',
+            };
+          }
+
+          // Redirect URL configuration issues
+          if (lower.includes('redirect_uri') || (lower.includes('redirect') && lower.includes('allowed'))) {
+            return {
+              success: false,
+              isSupabase: true,
+              error: `Error de configuración en Supabase: la URL de redirección no está autorizada en Authentication > URL Configuration. ${msg}`,
             };
           }
 
@@ -859,6 +934,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, error: 'La nueva contraseña debe tener al menos 6 caracteres.' };
     }
 
+    const storedRecoveryToken = typeof window !== 'undefined' ? sessionStorage.getItem('reewai_recovery_access_token') : null;
+    const storedSupabaseUrl = typeof window !== 'undefined' ? sessionStorage.getItem('reewai_recovery_supabase_url') : null;
+
     if (isSupabase) {
       const supabase = getSupabaseClient();
       if (supabase) {
@@ -873,16 +951,73 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               lower.includes('pwned') ||
               lower.includes('security')
             ) {
-              userFriendlyMsg =
-                'La contraseña no es suficientemente segura según las políticas de Supabase: debe tener al menos 6 caracteres y combinar números o letras.';
+              return {
+                success: false,
+                error:
+                  'La contraseña no es suficientemente segura según las políticas de Supabase: debe tener al menos 6 caracteres y combinar números o letras.',
+              };
             }
-            return { success: false, error: userFriendlyMsg };
+            if (storedRecoveryToken) {
+              const endpoint = (storedSupabaseUrl || getSupabaseConfig().url).replace(/\/+$/, '') + '/auth/v1/user';
+              const res = await fetch(endpoint, {
+                method: 'PUT',
+                headers: {
+                  Authorization: `Bearer ${storedRecoveryToken}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ password: cleanPassword }),
+              });
+              if (!res.ok) {
+                return { success: false, error: userFriendlyMsg };
+              }
+            } else {
+              return { success: false, error: userFriendlyMsg };
+            }
           }
         } catch (err: any) {
-          return {
-            success: false,
-            error: err.message || 'Error al actualizar contraseña en Supabase.',
-          };
+          if (storedRecoveryToken) {
+            const endpoint = (storedSupabaseUrl || getSupabaseConfig().url).replace(/\/+$/, '') + '/auth/v1/user';
+            try {
+              const res = await fetch(endpoint, {
+                method: 'PUT',
+                headers: {
+                  Authorization: `Bearer ${storedRecoveryToken}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ password: cleanPassword }),
+              });
+              if (!res.ok) {
+                return { success: false, error: err.message || 'Error al actualizar contraseña en Supabase.' };
+              }
+            } catch {
+              return { success: false, error: err.message || 'Error de conexión al actualizar contraseña.' };
+            }
+          } else {
+            return {
+              success: false,
+              error: err.message || 'Error al actualizar contraseña en Supabase.',
+            };
+          }
+        }
+      }
+    } else if (storedRecoveryToken) {
+      const targetUrl = (storedSupabaseUrl || '').replace(/\/+$/, '');
+      if (targetUrl.includes('.supabase.co')) {
+        try {
+          const res = await fetch(`${targetUrl}/auth/v1/user`, {
+            method: 'PUT',
+            headers: {
+              Authorization: `Bearer ${storedRecoveryToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ password: cleanPassword }),
+          });
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            return { success: false, error: errData.msg || errData.error_description || 'No se pudo actualizar la contraseña.' };
+          }
+        } catch (e: any) {
+          console.warn('Direct token reset notice:', e);
         }
       }
     }
