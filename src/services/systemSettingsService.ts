@@ -89,14 +89,31 @@ export function maskApiKey(key: string | null | undefined): string {
 
 /**
  * Returns the currently active Gemini API key (for analyzing links).
- * Checks memory, Supabase (if admin), local storage fallback, and env.
+ * Checks memory, central database server, Supabase (if admin), local storage fallback, and env.
  */
 export async function getActiveGeminiApiKey(user?: UserProfile | null): Promise<string | null> {
   if (inMemoryCachedKey) {
     return inMemoryCachedKey;
   }
 
-  // If user is admin and Supabase is configured, try fetching from Supabase
+  // 1. Check central server database
+  try {
+    const res = await fetch('/api/system-settings/gemini-key');
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && data?.hasKey && data?.apiKey) {
+        inMemoryCachedKey = data.apiKey.trim();
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(LOCAL_STORAGE_KEY, inMemoryCachedKey);
+        }
+        return inMemoryCachedKey;
+      }
+    }
+  } catch {
+    // Server not available / offline
+  }
+
+  // 2. If user is admin and Supabase is configured, try fetching from Supabase
   if (isUserAdmin(user) && isSupabaseConfigured()) {
     try {
       const supabase = getSupabaseClient();
@@ -117,7 +134,7 @@ export async function getActiveGeminiApiKey(user?: UserProfile | null): Promise<
     }
   }
 
-  // Check admin local storage fallback
+  // 3. Check admin local storage fallback
   if (typeof window !== 'undefined') {
     const local = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (local && local.trim().length > 5) {
@@ -126,7 +143,7 @@ export async function getActiveGeminiApiKey(user?: UserProfile | null): Promise<
     }
   }
 
-  // Check Vite client env variable if defined
+  // 4. Check Vite client env variable if defined
   const envKey = (import.meta.env.VITE_GEMINI_API_KEY || '').trim();
   if (envKey.length > 5) {
     return envKey;
@@ -138,7 +155,7 @@ export async function getActiveGeminiApiKey(user?: UserProfile | null): Promise<
 export interface StoredKeyInfo {
   apiKey: string | null;
   maskedKey: string;
-  source: 'supabase' | 'local' | 'env' | 'none';
+  source: 'central_database' | 'supabase' | 'local' | 'env' | 'none';
   updatedAt?: string;
   error?: string;
 }
@@ -156,7 +173,28 @@ export async function getStoredGeminiApiKey(user: UserProfile | null): Promise<S
     };
   }
 
-  // 1. Check Supabase
+  // 1. Check central server database (syncs seamlessly between PC, Mobile, and all devices)
+  try {
+    const res = await fetch('/api/system-settings/gemini-key');
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && data?.hasKey && data?.apiKey) {
+        inMemoryCachedKey = data.apiKey.trim();
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(LOCAL_STORAGE_KEY, inMemoryCachedKey);
+        }
+        return {
+          apiKey: inMemoryCachedKey,
+          maskedKey: data.maskedKey || maskApiKey(inMemoryCachedKey),
+          source: 'central_database',
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Central DB gemini-key check notice:', err);
+  }
+
+  // 2. Check Supabase
   if (isSupabaseConfigured()) {
     try {
       const supabase = getSupabaseClient();
@@ -185,7 +223,7 @@ export async function getStoredGeminiApiKey(user: UserProfile | null): Promise<S
     }
   }
 
-  // 2. Check Local Storage fallback
+  // 3. Check Local Storage fallback
   if (typeof window !== 'undefined') {
     const local = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (local && local.trim().length > 5) {
@@ -198,7 +236,7 @@ export async function getStoredGeminiApiKey(user: UserProfile | null): Promise<S
     }
   }
 
-  // 3. Check VITE_GEMINI_API_KEY
+  // 4. Check VITE_GEMINI_API_KEY
   const envKey = (import.meta.env.VITE_GEMINI_API_KEY || '').trim();
   if (envKey.length > 5) {
     return {
@@ -216,12 +254,12 @@ export async function getStoredGeminiApiKey(user: UserProfile | null): Promise<S
 }
 
 /**
- * Saves the Gemini API key in Supabase (and local backup).
+ * Saves the Gemini API key in Central Database (and Supabase/local backup).
  */
 export async function saveGeminiApiKey(
   apiKey: string,
   user: UserProfile | null
-): Promise<{ success: boolean; source: 'supabase' | 'local'; message: string; error?: string }> {
+): Promise<{ success: boolean; source: 'central_database' | 'supabase' | 'local'; message: string; error?: string }> {
   const cleanKey = apiKey.trim();
   if (!cleanKey) {
     return {
@@ -243,13 +281,34 @@ export async function saveGeminiApiKey(
 
   inMemoryCachedKey = cleanKey;
 
-  // Always save in localStorage backup so local sessions retain it
+  // 1. Always save in localStorage backup so local offline sessions retain it
   if (typeof window !== 'undefined') {
     try {
       localStorage.setItem(LOCAL_STORAGE_KEY, cleanKey);
     } catch {}
   }
 
+  // 2. Persist to Central Server Database (syncs with Mobile, Desktop, and all connected devices)
+  let savedInCentralDb = false;
+  try {
+    const res = await fetch('/api/system-settings/gemini-key', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ apiKey: cleanKey }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success) {
+        savedInCentralDb = true;
+      }
+    }
+  } catch (err) {
+    console.warn('Central DB gemini-key save notice:', err);
+  }
+
+  // 3. Persist to Supabase if configured
   let savedInSupabase = false;
   let supabaseErrorMsg = '';
 
@@ -286,6 +345,14 @@ export async function saveGeminiApiKey(
   }
   await fetchAiStatus(true);
 
+  if (savedInCentralDb) {
+    return {
+      success: true,
+      source: 'central_database',
+      message: '¡Clave Gemini API guardada con éxito en la base de datos central! Estará sincronizada en tu ordenador, móvil y cualquier dispositivo.',
+    };
+  }
+
   if (savedInSupabase) {
     return {
       success: true,
@@ -304,7 +371,7 @@ export async function saveGeminiApiKey(
 }
 
 /**
- * Removes the Gemini API key from Supabase and local storage.
+ * Removes the Gemini API key from Central Database, Supabase and local storage.
  */
 export async function removeGeminiApiKey(
   user: UserProfile | null
@@ -323,6 +390,12 @@ export async function removeGeminiApiKey(
     localStorage.removeItem(LOCAL_STORAGE_KEY);
   }
 
+  // Delete from central server DB
+  try {
+    await fetch('/api/system-settings/gemini-key', { method: 'DELETE' });
+  } catch {}
+
+  // Delete from Supabase
   if (isSupabaseConfigured()) {
     try {
       const supabase = getSupabaseClient();
@@ -341,7 +414,7 @@ export async function removeGeminiApiKey(
 
   return {
     success: true,
-    message: 'Clave de API eliminada correctamente.',
+    message: 'Clave de API eliminada correctamente de todos los dispositivos y base de datos.',
   };
 }
 

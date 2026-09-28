@@ -56,6 +56,7 @@ const DATA_DIR = path.join(process.cwd(), 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const LINKS_FILE = path.join(DATA_DIR, 'saved-links.json');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 // Atomic write utility to prevent file corruption
 function atomicWriteJson(filePath: string, data: any) {
@@ -192,6 +193,7 @@ class DatabaseManager {
   private usersCache: UserRecord[] = [];
   private linksCache: LinkRecord[] = [];
   private categoriesCache: CategoryRecord[] = [];
+  private settingsCache: Record<string, any> = {};
   private resetCodes: Map<string, { code: string; expiresAt: number }> = new Map();
   private isInitialized = false;
 
@@ -204,6 +206,20 @@ class DatabaseManager {
 
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+
+    // 0. Initialize Settings
+    if (!fs.existsSync(SETTINGS_FILE)) {
+      this.settingsCache = {};
+      atomicWriteJson(SETTINGS_FILE, this.settingsCache);
+    } else {
+      try {
+        const content = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+        this.settingsCache = JSON.parse(content || '{}');
+      } catch (e) {
+        console.error('Error reading settings from disk:', e);
+        this.settingsCache = {};
+      }
     }
 
     // 1. Initialize Users
@@ -902,7 +918,10 @@ class DatabaseManager {
       return { success: false, error: 'Usuario no autenticado.' };
     }
 
-    const categoryToDelete = this.categoriesCache.find((c) => c.id === categoryId && c.userId === userId);
+    // Match by ID OR by name (case-insensitive) to prevent ID divergence issues
+    const categoryToDelete = this.categoriesCache.find(
+      (c) => c.userId === userId && (c.id === categoryId || c.name.toLowerCase() === categoryId.toLowerCase())
+    );
     if (!categoryToDelete) {
       return { success: false, error: 'Categoría no encontrada.' };
     }
@@ -940,11 +959,27 @@ class DatabaseManager {
       atomicWriteJson(LINKS_FILE, this.linksCache);
     }
 
-    // Remove category
-    this.categoriesCache = this.categoriesCache.filter((c) => c.id !== categoryId);
+    // Remove category by both ID and resolved entity
+    this.categoriesCache = this.categoriesCache.filter((c) => c.userId !== userId || (c.id !== categoryToDelete.id && c.name.toLowerCase() !== categoryToDelete.name.toLowerCase()));
     atomicWriteJson(CATEGORIES_FILE, this.categoriesCache);
 
     return { success: true, reassignedLinksCount };
+  }
+
+  // ================= SYSTEM SETTINGS OPERATIONS =================
+
+  public getSetting(key: string): any {
+    return this.settingsCache[key];
+  }
+
+  public setSetting(key: string, value: any): void {
+    this.settingsCache[key] = value;
+    atomicWriteJson(SETTINGS_FILE, this.settingsCache);
+  }
+
+  public deleteSetting(key: string): void {
+    delete this.settingsCache[key];
+    atomicWriteJson(SETTINGS_FILE, this.settingsCache);
   }
 }
 

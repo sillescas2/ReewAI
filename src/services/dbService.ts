@@ -477,22 +477,47 @@ export class DatabaseService {
 
   /**
    * Fetches user's registered categories.
-   * Multi-layer sync: LocalStorage -> Supabase -> Central Express API.
-   * Never throws or shows HTML parse errors on static hosting (Netlify).
+   * Multi-layer sync with Server API as authoritative source of truth.
+   * Prevents resurrecting deleted categories across devices (PC <-> Mobile).
    */
   static async fetchCategories(userId: string): Promise<{ success: boolean; data: CategoryItem[]; error?: string }> {
     if (!userId) {
       return { success: false, data: [], error: 'userId es requerido' };
     }
 
-    // 1. Check local storage cache
-    let categories = getStoredCategories(userId);
-    if (categories.length === 0) {
-      categories = getDefaultCategories(userId);
-      saveStoredCategories(userId, categories);
+    // 1. Try Server API first (Authoritative source of truth across PC and Mobile)
+    try {
+      const res = await fetch(`/api/categories?userId=${encodeURIComponent(userId)}`, {
+        headers: {
+          Accept: 'application/json',
+          'X-User-Id': userId,
+        },
+      });
+
+      const parsed = await safeParseJson(res);
+      if (parsed.isJson && res.ok && parsed.data?.success && Array.isArray(parsed.data?.data) && parsed.data.data.length > 0) {
+        const serverCats: CategoryItem[] = parsed.data.data;
+        // Server database is the Single Source of Truth: update local cache
+        saveStoredCategories(userId, serverCats);
+        return {
+          success: true,
+          data: serverCats,
+        };
+      }
+    } catch {
+      // Backend not reachable / offline
     }
 
-    // 2. Try Supabase if configured
+    // 2. Check local storage cache if server wasn't reachable
+    let categories = getStoredCategories(userId);
+    if (categories.length > 0) {
+      return {
+        success: true,
+        data: categories,
+      };
+    }
+
+    // 3. Try Supabase if configured
     if (isSupabaseConfigured()) {
       try {
         const supabase = getSupabaseClient();
@@ -511,13 +536,11 @@ export class DatabaseService {
               description: row.description || '',
               createdAt: row.created_at,
             }));
-
-            // Merge local and Supabase categories
-            const mergedMap = new Map<string, CategoryItem>();
-            categories.forEach((c) => mergedMap.set(c.name.toLowerCase(), c));
-            mapped.forEach((c) => mergedMap.set(c.name.toLowerCase(), c));
-            categories = Array.from(mergedMap.values());
-            saveStoredCategories(userId, categories);
+            saveStoredCategories(userId, mapped);
+            return {
+              success: true,
+              data: mapped,
+            };
           }
         }
       } catch (err) {
@@ -525,27 +548,9 @@ export class DatabaseService {
       }
     }
 
-    // 3. Try Server API if active
-    try {
-      const res = await fetch(`/api/categories?userId=${encodeURIComponent(userId)}`, {
-        headers: {
-          Accept: 'application/json',
-          'X-User-Id': userId,
-        },
-      });
-
-      const parsed = await safeParseJson(res);
-      if (parsed.isJson && res.ok && parsed.data?.success && Array.isArray(parsed.data?.data) && parsed.data.data.length > 0) {
-        const serverCats: CategoryItem[] = parsed.data.data;
-        const mergedMap = new Map<string, CategoryItem>();
-        categories.forEach((c) => mergedMap.set(c.name.toLowerCase(), c));
-        serverCats.forEach((c) => mergedMap.set(c.name.toLowerCase(), c));
-        categories = Array.from(mergedMap.values());
-        saveStoredCategories(userId, categories);
-      }
-    } catch {
-      // Safe fallback to local cache
-    }
+    // 4. Default categories only if no categories exist anywhere
+    categories = getDefaultCategories(userId);
+    saveStoredCategories(userId, categories);
 
     return {
       success: true,
@@ -740,7 +745,8 @@ export class DatabaseService {
     }
 
     const current = getStoredCategories(userId);
-    const updatedList = current.filter((c) => c.id !== categoryId);
+    const target = current.find((c) => c.id === categoryId);
+    const updatedList = current.filter((c) => c.id !== categoryId && (!target || c.name.toLowerCase() !== target.name.toLowerCase()));
     saveStoredCategories(userId, updatedList);
 
     // Supabase delete
@@ -759,9 +765,10 @@ export class DatabaseService {
       } catch {}
     }
 
-    // Try server delete
+    // Try server delete (pass both ID and name fallback)
     try {
-      const res = await fetch(`/api/categories/${encodeURIComponent(categoryId)}?userId=${encodeURIComponent(userId)}`, {
+      const nameParam = target ? `&name=${encodeURIComponent(target.name)}` : '';
+      const res = await fetch(`/api/categories/${encodeURIComponent(categoryId)}?userId=${encodeURIComponent(userId)}${nameParam}`, {
         method: 'DELETE',
         headers: {
           'X-User-Id': userId,

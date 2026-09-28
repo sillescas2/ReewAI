@@ -492,10 +492,16 @@ async function fetchMediaMetadata(url: string, platform: string): Promise<Extrac
 
 // Lazy Gemini client helper
 let genAiInstance: GoogleGenAI | null = null;
+let currentActiveApiKey = '';
+
 function getGenAI(): GoogleGenAI {
-  if (!genAiInstance) {
+  const dbKey = (db.getSetting('GEMINI_API_KEY') as string) || '';
+  const resolvedKey = dbKey.trim() || (process.env.GEMINI_API_KEY || '').trim();
+
+  if (!genAiInstance || currentActiveApiKey !== resolvedKey) {
+    currentActiveApiKey = resolvedKey;
     genAiInstance = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+      apiKey: resolvedKey,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
@@ -517,12 +523,17 @@ app.get('/api/health', (req: Request, res: Response) => {
   });
 });
 
-// AI Configuration Status (Checks whether GEMINI_API_KEY is defined in environment or database/app)
+// AI Configuration Status (Checks whether GEMINI_API_KEY is defined in central DB, environment or headers)
 app.get('/api/ai-status', (req: Request, res: Response) => {
   const headerKey = (req.headers['x-gemini-api-key'] as string) || (req.query.testKey as string);
-  const rawKey = (headerKey || '').trim() || process.env.GEMINI_API_KEY;
+  const dbKey = (db.getSetting('GEMINI_API_KEY') as string) || '';
+  const rawKey = (headerKey || '').trim() || dbKey.trim() || (process.env.GEMINI_API_KEY || '').trim();
   const hasKey = Boolean(rawKey && rawKey.trim().length > 5);
-  const source = headerKey ? 'database_or_app' : (process.env.GEMINI_API_KEY ? 'server_env' : 'none');
+  const source = headerKey
+    ? 'header_or_request'
+    : (dbKey.trim().length > 5
+        ? 'central_database'
+        : (process.env.GEMINI_API_KEY ? 'server_env' : 'none'));
 
   res.json({
     success: true,
@@ -533,10 +544,12 @@ app.get('/api/ai-status', (req: Request, res: Response) => {
     provider: 'Google Gemini AI',
     environment: process.env.NETLIFY ? 'netlify' : 'node',
     message: hasKey
-      ? (source === 'database_or_app'
-          ? 'GEMINI_API_KEY activa desde Supabase / Configuración de Administrador.'
-          : 'La variable GEMINI_API_KEY está configurada en las variables de entorno.')
-      : 'La variable de entorno GEMINI_API_KEY no está configurada.',
+      ? (source === 'central_database'
+          ? 'GEMINI_API_KEY activa y sincronizada desde la base de datos central de ReewAI.'
+          : (source === 'header_or_request'
+              ? 'GEMINI_API_KEY proporcionada por el cliente/administrador.'
+              : 'La variable GEMINI_API_KEY está configurada en las variables de entorno.'))
+      : 'La clave GEMINI_API_KEY no está configurada.',
     setupGuide: {
       variableName: 'GEMINI_API_KEY',
       dashboardUrl: 'https://app.netlify.com',
@@ -550,6 +563,61 @@ app.get('/api/ai-status', (req: Request, res: Response) => {
         'IMPORTANTE: Ve a la pestaña "Deploys" -> pulsa "Trigger deploy" -> "Clear cache and deploy site" para que Netlify cargue la nueva variable en las funciones serverless.',
       ],
     },
+  });
+});
+
+// Central Database System Settings: Gemini API Key endpoints
+app.get('/api/system-settings/gemini-key', (req: Request, res: Response) => {
+  const dbKey = ((db.getSetting('GEMINI_API_KEY') as string) || '').trim();
+  const envKey = (process.env.GEMINI_API_KEY || '').trim();
+  const activeKey = dbKey || envKey;
+
+  if (!activeKey || activeKey.length < 5) {
+    return res.json({
+      success: true,
+      hasKey: false,
+      apiKey: null,
+      maskedKey: '',
+      source: 'none',
+    });
+  }
+
+  const maskedKey = activeKey.length > 8 ? `${activeKey.slice(0, 6)}...${activeKey.slice(-4)}` : '••••••••';
+  res.json({
+    success: true,
+    hasKey: true,
+    apiKey: activeKey,
+    maskedKey,
+    source: dbKey ? 'central_database' : 'server_env',
+  });
+});
+
+app.post('/api/system-settings/gemini-key', (req: Request, res: Response) => {
+  const { apiKey } = req.body;
+  const clean = (apiKey || '').trim();
+  if (!clean || clean.length < 5) {
+    return res.status(400).json({ success: false, error: 'Por favor introduce una clave de API válida.' });
+  }
+
+  db.setSetting('GEMINI_API_KEY', clean);
+  process.env.GEMINI_API_KEY = clean;
+  genAiInstance = null; // force re-initialization
+
+  const maskedKey = clean.length > 8 ? `${clean.slice(0, 6)}...${clean.slice(-4)}` : '••••••••';
+  res.json({
+    success: true,
+    message: 'Clave Gemini API guardada con éxito en la base de datos central.',
+    maskedKey,
+    source: 'central_database',
+  });
+});
+
+app.delete('/api/system-settings/gemini-key', (req: Request, res: Response) => {
+  db.deleteSetting('GEMINI_API_KEY');
+  genAiInstance = null;
+  res.json({
+    success: true,
+    message: 'Clave Gemini API eliminada de la base de datos central.',
   });
 });
 
@@ -1038,7 +1106,15 @@ app.delete('/api/categories/:id', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, error: 'userId es obligatorio.' });
   }
 
-  const result = db.deleteCategory(targetUserId, id);
+  const categoryLookup = (req.query.name as string) || id;
+  const result = db.deleteCategory(targetUserId, categoryLookup);
+  if (!result.success && req.query.name && id !== req.query.name) {
+    // If not found by name, try direct id
+    const retryResult = db.deleteCategory(targetUserId, id);
+    if (retryResult.success) {
+      return res.json(retryResult);
+    }
+  }
   if (!result.success) {
     return res.status(400).json(result);
   }
@@ -1050,7 +1126,8 @@ app.delete('/api/categories/:id', (req: Request, res: Response) => {
 app.post('/api/analyze-link', async (req: Request, res: Response) => {
   try {
     const { url, userNote, manualTitle, manualSummary, existingItems = [], allowedCategories = [], categoryObjects: providedCategories, userId, apiKey: providedKey } = req.body;
-    const apiKey = (providedKey || (req.headers['x-gemini-api-key'] as string) || '').trim() || process.env.GEMINI_API_KEY;
+    const dbKey = ((db.getSetting('GEMINI_API_KEY') as string) || '').trim();
+    const apiKey = (providedKey || (req.headers['x-gemini-api-key'] as string) || '').trim() || dbKey || process.env.GEMINI_API_KEY;
 
     if (!url || typeof url !== 'string' || !url.trim()) {
       return res.status(400).json({ success: false, error: 'Por favor ingresa una URL válida.' });
